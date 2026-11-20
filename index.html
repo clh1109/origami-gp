@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#faf3e3" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23faf3e3'/%3E%3Cpath d='M6 22 L16 6 L26 22 L16 18 Z' fill='%23e05a47' stroke='%233b2f27' stroke-width='1.5'/%3E%3C/svg%3E"
+    />
+    <title>折纸奇旅 · Origami GP</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // 直接双击普通构建的 HTML（file://）时浏览器禁止加载外部模块，会白屏；
+      // 延迟检测：若 1.2s 后 root 仍为空才提示（单文件版内联模块会正常填充，不触发）。
+      if (location.protocol === 'file:') {
+        setTimeout(function () {
+          var r = document.getElementById('root');
+          if (r && r.children.length === 0) {
+            r.innerHTML =
+              '<div style="max-width:560px;margin:12vh auto;padding:28px 32px;border:2px solid #3b2f27;border-radius:16px;' +
+              'background:#faf3e3;color:#3b2f27;font-family:Trebuchet MS,Segoe UI,sans-serif;line-height:1.7">' +
+              '<h2 style="margin:0 0 12px">请通过本地服务器打开</h2>' +
+              '<p style="margin:0 0 10px">直接双击 index.html / dist/index.html（file:// 协议）无法加载模块，因此显示空白。</p>' +
+              '<p style="margin:0 0 6px">在项目目录执行：<code style="background:#e8dcc8;padding:2px 6px;border-radius:6px">npm run dev</code></p>' +
+              '<p style="margin:0 0 6px">然后浏览器访问：<b>http://localhost:5173</b></p>' +
+              '<p style="margin:0">或构建后执行 <code style="background:#e8dcc8;padding:2px 6px;border-radius:6px">npm run preview</code>，访问 <b>http://localhost:4173</b></p>' +
+              '</div>';
+          }
+        }, 1200);
+      }
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

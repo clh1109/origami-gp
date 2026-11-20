@@ -1,0 +1,24 @@
+# 依赖
+node_modules
+node_modules/.tmp
+
+# 构建产物
+dist
+dist-ssr
+dist-single
+*.tsbuildinfo
+
+# 本地验证截图 / 日志
+shots
+*.log.txt
+
+# 分享打包产物（可由 npm run build:single 重新生成）
+*.zip
+share/*.html
+
+# 杂项
+*.local
+.DS_Store
+Thumbs.db
+# 顶层单文件副本（构建产物）
+/折纸奇旅OrigamiGP.html
