@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { RacerSpec, PaperSpec } from '../types/game';
-import { loadPaperGLB } from './ModelLoader';
 import {
   createPaperMaterial,
   createTexturedPaperMaterial,
@@ -570,26 +569,6 @@ export function buildCar(racer: RacerSpec, _paper: PaperSpec, ghost = false): Ca
   const chassis = buildStreamlinedChassis(racer, primary, accent, dark, kraft, cream, ghost);
   chassis.position.y = 0.34;
   tiltGroup.add(chassis);
-
-  // 外部精致折纸车模（若放入 public/models/kart.glb 或 kart_<id>.glb 则自动优雅替换手搓车壳）
-  if (!ghost) {
-    (loadPaperGLB(`/models/kart_${racer.id}.glb`, {
-      targetSize: 4.4,
-      keepOriginalMap: true,
-      tintColor: 0xffffff,
-      flatShading: true,
-    }).then((glb) => glb ?? loadPaperGLB('/models/kart.glb', {
-      targetSize: 4.4,
-      keepOriginalMap: true,
-      tintColor: 0xffffff,
-      flatShading: true,
-    }))).then((glbCar) => {
-      if (!glbCar) return;
-      chassis.visible = false;
-      glbCar.position.y = 0.28;
-      tiltGroup.add(glbCar);
-    });
-  }
 
   // 2. 柔边径向渐变贴地接触阴影
   const tray = new THREE.Mesh(

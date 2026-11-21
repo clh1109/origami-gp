@@ -125,15 +125,6 @@ export default function App() {
   return (
     <div className="fixed inset-0 overflow-hidden">
       <canvas ref={canvasRef} className="fixed inset-0 h-full w-full" />
-      {/* 全屏水彩纸纹细微噪点叠加层（微缩绘本纸质触感） */}
-      <div
-        className="pointer-events-none fixed inset-0 z-10 opacity-30 mix-blend-multiply"
-        style={{
-          backgroundImage: `radial-gradient(rgba(59, 47, 39, 0.08) 1px, transparent 0), radial-gradient(rgba(217, 180, 130, 0.08) 1px, transparent 0)`,
-          backgroundSize: '12px 12px, 20px 20px',
-          backgroundPosition: '0 0, 6px 6px',
-        }}
-      />
       {initError && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-paper p-6">
           <div className="paper-card origami-border max-w-md rounded-2xl p-6 shadow-pop">

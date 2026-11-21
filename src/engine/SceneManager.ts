@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { N8AOPass } from 'n8ao';
 import type { TrackColors } from '../types/game';
 import { makeTiltShiftPass, makeBloomPass, setTiltResolution, setTiltFocus } from './PostFX';
@@ -59,13 +58,6 @@ export class SceneManager {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xebe6d6);
     this.scene.fog = new THREE.Fog(0xebe6d6, 120, 480);
-
-    // 接入 RoomEnvironment IBL 柔光环境反射，让全场景折纸与外部模型拥有自然微柔环境漫反射
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    pmrem.compileEquirectangularShader();
-    const envScene = new RoomEnvironment();
-    this.scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-    pmrem.dispose();
 
     // near 从 0.1 提到 0.5，显著降低路面多层薄片的远处 Z-fighting
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.5, 900);
@@ -228,10 +220,6 @@ export class SceneManager {
 
   dispose(): void {
     this.disposed = true;
-    if (this.scene.environment) {
-      this.scene.environment.dispose();
-      this.scene.environment = null;
-    }
     this.composer.dispose?.();
     this.n8aoPass.dispose?.();
     this.renderer.dispose();
