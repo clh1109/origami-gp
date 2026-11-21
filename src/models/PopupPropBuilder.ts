@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { PopupPropRig, PropTheme, TrackColors } from '../types/game';
 import {
   paperMesh,
@@ -667,38 +668,95 @@ export function popAllInstant(props: PopupPropRig[]): void {
 
 // ---------- 路边连续地饰几何工厂（栅栏 / 灌木 / 纸花，供 TrackBuilder 批量合并） ----------
 let fenceGeos: THREE.BufferGeometry[] | null = null;
+/** 童话尖顶折纸小栅栏（带尖顶立柱 + 双横木 + 立体书纸舌底座） */
 export function getFenceSectionGeos(): THREE.BufferGeometry[] {
   if (!fenceGeos) {
-    const post = new THREE.BoxGeometry(0.16, 0.95, 0.16);
-    const rail = new THREE.BoxGeometry(2.56, 0.12, 0.1);
-    const p1 = post.clone().translate(-1.2, 0.475, 0);
-    const p2 = post.clone().translate(1.2, 0.475, 0);
-    const r1 = rail.clone().translate(0, 0.68, 0);
-    const r2 = rail.clone().translate(0, 0.36, 0);
-    post.dispose();
+    const postBody = new THREE.BoxGeometry(0.18, 0.85, 0.14);
+    const postTip = new THREE.ConeGeometry(0.13, 0.24, 4);
+    postTip.rotateY(Math.PI / 4);
+    const foot = new THREE.BoxGeometry(0.32, 0.06, 0.28);
+    const rail = new THREE.BoxGeometry(2.58, 0.13, 0.09);
+
+    const makePost = (x: number) => [
+      postBody.clone().translate(x, 0.425, 0),
+      postTip.clone().translate(x, 0.96, 0),
+      foot.clone().translate(x, 0.03, 0),
+    ];
+
+    fenceGeos = [
+      ...makePost(-1.18),
+      ...makePost(0),
+      ...makePost(1.18),
+      rail.clone().translate(0, 0.68, 0.05),
+      rail.clone().translate(0, 0.34, 0.05),
+    ];
+    postBody.dispose();
+    postTip.dispose();
+    foot.dispose();
     rail.dispose();
-    fenceGeos = [p1, p2, r1, r2];
   }
   return fenceGeos;
 }
 
 let bushGeo: THREE.BufferGeometry | null = null;
+/** 三团错落叠合的云朵剪纸灌木丛 */
 export function getBushGeo(): THREE.BufferGeometry {
   if (!bushGeo) {
-    bushGeo = new THREE.IcosahedronGeometry(0.85, 0);
-    bushGeo.scale(1, 0.62, 1);
-    bushGeo.translate(0, 0.5, 0);
+    const g1 = new THREE.IcosahedronGeometry(0.76, 1);
+    g1.scale(1.05, 0.72, 0.95);
+    g1.translate(0, 0.52, 0);
+
+    const g2 = new THREE.IcosahedronGeometry(0.56, 1);
+    g2.scale(1.0, 0.7, 1.0);
+    g2.translate(-0.62, 0.38, 0.16);
+
+    const g3 = new THREE.IcosahedronGeometry(0.52, 1);
+    g3.scale(1.0, 0.68, 1.0);
+    g3.translate(0.58, 0.35, -0.14);
+
+    const parts = [g1, g2, g3].map((g) => (g.index ? g.toNonIndexed() : g));
+    bushGeo = mergeGeometries(parts, false) ?? g1;
+    parts.forEach((p) => p.dispose());
   }
   return bushGeo;
 }
 
 let flowerGeos: { stem: THREE.BufferGeometry; head: THREE.BufferGeometry } | null = null;
+/** 展开的 5 瓣折纸星花 + 带双叶的花茎 */
 export function getFlowerGeos(): { stem: THREE.BufferGeometry; head: THREE.BufferGeometry } {
   if (!flowerGeos) {
-    const stem = new THREE.CylinderGeometry(0.045, 0.06, 0.55, 5);
-    stem.translate(0, 0.275, 0);
-    const head = new THREE.ConeGeometry(0.24, 0.42, 5);
-    head.translate(0, 0.66, 0);
+    // 花茎 + 两侧斜展纸叶
+    const stalk = new THREE.CylinderGeometry(0.045, 0.06, 0.62, 5);
+    stalk.translate(0, 0.31, 0);
+    const leafL = new THREE.ConeGeometry(0.14, 0.36, 4);
+    leafL.scale(0.5, 1, 0.25);
+    leafL.rotateZ(0.85);
+    leafL.translate(-0.14, 0.28, 0);
+    const leafR = new THREE.ConeGeometry(0.14, 0.36, 4);
+    leafR.scale(0.5, 1, 0.25);
+    leafR.rotateZ(-0.85);
+    leafR.translate(0.14, 0.32, 0);
+    const stemParts = [stalk, leafL, leafR].map((g) => (g.index ? g.toNonIndexed() : g));
+    const stem = mergeGeometries(stemParts, false) ?? stalk;
+    stemParts.forEach((p) => p.dispose());
+
+    // 5 瓣向外展开的折纸星花花冠
+    const petalParts: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      const p = new THREE.ConeGeometry(0.14, 0.32, 4);
+      p.scale(0.85, 1, 0.3);
+      p.rotateX(Math.PI / 2 - 0.35);
+      p.rotateY(a);
+      p.translate(Math.sin(a) * 0.16, 0.66, Math.cos(a) * 0.16);
+      petalParts.push(p.index ? p.toNonIndexed() : p);
+    }
+    const core = new THREE.OctahedronGeometry(0.11, 0);
+    core.translate(0, 0.68, 0);
+    petalParts.push(core.index ? core.toNonIndexed() : core);
+    const head = mergeGeometries(petalParts, false) ?? core;
+    petalParts.forEach((p) => p.dispose());
+
     flowerGeos = { stem, head };
   }
   return flowerGeos;

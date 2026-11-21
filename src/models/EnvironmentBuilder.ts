@@ -346,18 +346,31 @@ function buildInfieldCenterpiece(
   const spinners: THREE.Object3D[] = [];
   infieldGroup.position.set(center.x, 0, center.z);
 
-  // 1. 展台外围一圈矮栅栏与彩色小花圃（r = 9.8，让选车大厅瞬间丰满）
+  // 1. 展台外围一圈尖顶折纸栅栏与彩色小花圃（r = 9.8，让选车大厅瞬间丰满）
   const fenceColor = night ? 0x3f507a : 0xfffcf5;
   const flowerColors = [0xe05a47, 0xf4d35e, 0xf4a6b8, 0x9fd4ea];
+  const postPositions: { x: number; z: number; angle: number }[] = [];
+
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2;
     // 留出正前方和正后方入口，不遮挡展台镜头
     if (Math.abs(Math.sin(a)) < 0.25) continue;
     const fx = Math.cos(a) * 9.8;
     const fz = Math.sin(a) * 9.8;
+    postPositions.push({ x: fx, z: fz, angle: a });
+
+    const postGroup = new THREE.Group();
     const post = paperMesh(new THREE.BoxGeometry(0.28, 1.15, 0.28), fenceColor);
-    post.position.set(fx, 0.58, fz);
-    infieldGroup.add(post);
+    post.position.y = 0.58;
+    postGroup.add(post);
+
+    const tip = paperMesh(new THREE.ConeGeometry(0.2, 0.28, 4), fenceColor);
+    tip.rotateY(Math.PI / 4);
+    tip.position.y = 1.15 + 0.14;
+    postGroup.add(tip);
+
+    postGroup.position.set(fx, 0, fz);
+    infieldGroup.add(postGroup);
 
     // 栅栏旁点缀三朵迷你彩色折纸花
     for (let k = 0; k < 3; k++) {
@@ -368,6 +381,27 @@ function buildInfieldCenterpiece(
       );
       fHead.position.set(fx + (k - 1) * 0.65, 0.52, fz + (k % 2 === 0 ? 0.55 : -0.55));
       infieldGroup.add(fHead);
+    }
+  }
+
+  // 相邻立柱间连上双层白色横木条（跳过开通的入口通道）
+  for (let i = 0; i < postPositions.length; i++) {
+    const nextIdx = (i + 1) % postPositions.length;
+    const p1 = postPositions[i];
+    const p2 = postPositions[nextIdx];
+    const dx = p2.x - p1.x;
+    const dz = p2.z - p1.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 4.5) {
+      const mx = (p1.x + p2.x) / 2;
+      const mz = (p1.z + p2.z) / 2;
+      const rotY = Math.atan2(dx, dz);
+      for (const y of [0.42, 0.82]) {
+        const rail = paperMesh(new THREE.BoxGeometry(0.12, 0.14, dist), fenceColor, { edges: false });
+        rail.position.set(mx, y, mz);
+        rail.rotation.y = rotY;
+        infieldGroup.add(rail);
+      }
     }
   }
 
@@ -463,17 +497,22 @@ function buildInfieldCenterpiece(
       [5, 16, 0.95],
       [-6, 17, 1.1],
     ];
+    const treeLayers = [
+      { r: 2.45, h: 2.6, y: 2.8, col: 0x4c804b, rot: 0 },
+      { r: 1.85, h: 2.3, y: 4.3, col: 0x68a361, rot: Math.PI / 8 },
+      { r: 1.25, h: 2.0, y: 5.7, col: 0x8ec47e, rot: 0 },
+    ];
     for (const [tx, tz, sc] of treeSpots) {
       const tr = new THREE.Group();
-      const trunk = paperMesh(new THREE.CylinderGeometry(0.32, 0.45, 2.2, 6), 0x7a5638);
-      trunk.position.y = 1.1;
+      const trunk = paperMesh(new THREE.CylinderGeometry(0.32, 0.48, 2.0, 6), 0x7a5638);
+      trunk.position.y = 1.0;
       tr.add(trunk);
-      const c1 = paperMesh(new THREE.ConeGeometry(2.3, 2.8, 7), 0x5c9457);
-      c1.position.y = 3.1;
-      tr.add(c1);
-      const c2 = paperMesh(new THREE.ConeGeometry(1.65, 2.4, 7), 0x7cb572);
-      c2.position.y = 4.8;
-      tr.add(c2);
+      for (const layer of treeLayers) {
+        const cone = paperMesh(new THREE.ConeGeometry(layer.r, layer.h, 8), layer.col);
+        cone.position.y = layer.y;
+        cone.rotation.y = layer.rot;
+        tr.add(cone);
+      }
       tr.position.set(tx, 0, tz);
       tr.scale.setScalar(sc);
       infieldGroup.add(tr);
@@ -505,16 +544,31 @@ function buildInfieldCenterpiece(
     spire.position.set(-14, 6.5, -12);
     infieldGroup.add(spire);
   } else {
-    // 午后书桌：手账彩色笔筒
+    // 午后书桌：手账彩色笔筒 + 削尖六棱彩色铅笔
     const cup = paperMesh(new THREE.CylinderGeometry(3.4, 3.0, 6.5, 12), 0xe05a47);
     cup.position.set(-14, 3.25, -12);
     infieldGroup.add(cup);
     const pCols = [0xf4d35e, 0x4b8ab0, 0x8eb87a];
     for (let i = 0; i < 3; i++) {
-      const p = paperMesh(new THREE.CylinderGeometry(0.55, 0.55, 10, 6), pCols[i]);
-      p.position.set(-14 + (i - 1) * 1.1, 6.5, -12 + (i % 2) * 0.8);
-      p.rotation.z = (i - 1) * 0.16;
-      infieldGroup.add(p);
+      const pencil = new THREE.Group();
+      // 六棱柱彩色笔杆
+      const body = paperMesh(new THREE.CylinderGeometry(0.55, 0.55, 9.2, 6), pCols[i]);
+      body.position.y = 4.6;
+      pencil.add(body);
+
+      // 原木削尖圆锥切面
+      const woodTip = paperMesh(new THREE.ConeGeometry(0.55, 1.3, 6), 0xd9c4a0);
+      woodTip.position.y = 9.2 + 0.65;
+      pencil.add(woodTip);
+
+      // 黑色石墨铅芯尖
+      const leadCore = paperMesh(new THREE.ConeGeometry(0.2, 0.45, 6), 0x242424);
+      leadCore.position.y = 9.2 + 1.3 + 0.225;
+      pencil.add(leadCore);
+
+      pencil.position.set(-14 + (i - 1) * 1.1, 1.5, -12 + (i % 2) * 0.8);
+      pencil.rotation.z = (i - 1) * 0.16;
+      infieldGroup.add(pencil);
     }
   }
 

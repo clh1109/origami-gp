@@ -569,7 +569,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
   startGroup.add(startLine);
   group.add(startGroup);
 
-  // ---------- 发光加速带（橙黄滚动箭头，随坡道对齐） ----------
+  // ---------- 发光加速带（立体折纸箭羽 + 厚卡纸底座与双翼导流） ----------
   const boostPads: BoostPadEntity[] = [];
   const boostTex = boostArrowTexture();
   group.userData.boostTex = boostTex;
@@ -581,6 +581,10 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     roughness: 0.75,
     metalness: 0,
   });
+  const padBaseMat = createPaperMaterial(0xfcf6e8, undefined, 0.9);
+  const finMat = createPaperMaterial(0xe05a47, undefined, 0.85);
+  const chevronMat = createEmissivePaper(0xff8811, 0xff4400, 0.75);
+
   for (const bt of spec.boostT) {
     const p = curve.getPointAt(bt);
     const tg = curve.getTangentAt(bt);
@@ -589,22 +593,83 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     padGroup.rotation.order = 'YXZ';
     padGroup.rotation.y = heading;
     padGroup.rotation.x = -Math.atan2(tg.y, Math.hypot(tg.x, tg.z));
-    const pad = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.7, 5), padMat);
+
+    // 厚卡纸垫板底座
+    const padBase = new THREE.Mesh(new THREE.BoxGeometry(w * 0.72, 0.12, 5.2), padBaseMat);
+    padBase.position.y = -0.04;
+    padBase.receiveShadow = true;
+    padGroup.add(padBase);
+
+    // 动态滚动箭头跑道面
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.68, 5.0), padMat);
     pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.03;
     pad.receiveShadow = true;
     padGroup.add(pad);
-    // 两侧牛皮纸包边
+
+    // 左右折纸导流小翼与包边
     for (const s of [-1, 1]) {
-      const rail = paperMesh(new THREE.BoxGeometry(0.28, 0.16, 5), 0xe8dcc8, { edges: false });
-      rail.position.set(s * (w * 0.35 + 0.16), 0.05, 0);
+      const rail = paperMesh(new THREE.BoxGeometry(0.24, 0.18, 5.1), 0xe8dcc8, { edges: false });
+      rail.position.set(s * (w * 0.35 + 0.12), 0.06, 0);
       padGroup.add(rail);
+
+      const fin = new THREE.Mesh(new THREE.ConeGeometry(0.38, 4.8, 3), finMat);
+      fin.rotation.x = Math.PI / 2;
+      fin.rotation.z = s * 0.35;
+      fin.scale.set(0.32, 1, 0.65);
+      fin.position.set(s * (w * 0.36 + 0.18), 0.24, 0);
+      fin.castShadow = true;
+      padGroup.add(fin);
     }
+
+    // 3 阶立体折角自发光折纸箭羽
+    for (let k = -1; k <= 1; k++) {
+      const cz = k * 1.45;
+      const cy = 0.06 + (k + 1) * 0.03;
+      const armL = new THREE.Mesh(new THREE.BoxGeometry(w * 0.26, 0.07, 0.28), chevronMat);
+      armL.position.set(-w * 0.11, cy, cz - 0.2);
+      armL.rotation.y = 0.42;
+      const armR = new THREE.Mesh(new THREE.BoxGeometry(w * 0.26, 0.07, 0.28), chevronMat);
+      armR.position.set(w * 0.11, cy, cz - 0.2);
+      armR.rotation.y = -0.42;
+      padGroup.add(armL, armR);
+    }
+
     padGroup.position.set(p.x, p.y + 0.1, p.z);
     group.add(padGroup);
     boostPads.push({ mesh: padGroup, t: bt, pos: p.clone(), dir: tg.clone() });
   }
 
-  // ---------- 道具箱 ----------
+  // ---------- 道具箱（丝带蝴蝶结折纸礼盒） ----------
+  function createOrigamiGiftBox(qMat: THREE.Material): THREE.Group {
+    const gift = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.65, 1.65, 1.65), qMat);
+    box.castShadow = true;
+    attachOrigamiEdges(box, 20);
+    gift.add(box);
+
+    // 交叉珊瑚红纸丝带
+    const ribbonMat = createPaperMaterial(0xe05a47, undefined, 0.82);
+    const bandX = new THREE.Mesh(new THREE.BoxGeometry(1.72, 1.72, 0.28), ribbonMat);
+    const bandZ = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.72, 1.72), ribbonMat);
+    gift.add(bandX, bandZ);
+
+    // 顶部立体四叶折纸蝴蝶结
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const loop = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.68, 4), ribbonMat);
+      loop.scale.set(0.65, 1, 0.38);
+      loop.rotation.z = Math.PI / 2 - 0.35;
+      loop.rotation.y = a;
+      loop.position.set(Math.cos(a) * 0.32, 1.02, Math.sin(a) * 0.32);
+      gift.add(loop);
+    }
+    const knot = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), createPaperMaterial(0xf4d35e));
+    knot.position.y = 0.96;
+    gift.add(knot);
+    return gift;
+  }
+
   const itemBoxes: ItemBoxEntity[] = [];
   const qTex = questionTexture();
   const boxMat = new THREE.MeshStandardMaterial({
@@ -622,11 +687,9 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     const n = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
     for (let k = -2; k <= 2; k++) {
       const pos = p.clone().addScaledVector(n, k * (w * 0.18));
-      const box = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.7, 1.7), boxMat);
-      attachOrigamiEdges(box, 20);
+      const box = createOrigamiGiftBox(boxMat);
       box.position.set(pos.x, pos.y + 1.5, pos.z);
       box.userData.baseY = pos.y + 1.5;
-      box.castShadow = true;
       group.add(box);
       itemBoxes.push({ mesh: box, pos: pos.clone(), t: it, respawn: 0, active: true });
     }
