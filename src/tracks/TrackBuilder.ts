@@ -84,7 +84,48 @@ function boostArrowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-/** 在赛道样条上构建可穿行的立体书故事分镜（跨溪蓝河 / 彩色拱门隧道 / 坡顶绘本画框） */
+/** 绘制带真实厘米刻度的木头直尺贴图 */
+function createWoodRulerTexture(): THREE.CanvasTexture {
+  const W = 1024;
+  const H = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d')!;
+
+  // 暖蜂蜜木纹底色
+  ctx.fillStyle = '#e5be7e';
+  ctx.fillRect(0, 0, W, H);
+  for (let y = 0; y < H; y += 3) {
+    ctx.fillStyle = y % 6 === 0 ? 'rgba(155, 105, 45, 0.14)' : 'rgba(255, 240, 200, 0.08)';
+    ctx.fillRect(0, y, W, 2);
+  }
+
+  // 两侧精细毫米/厘米刻度线与数字
+  ctx.fillStyle = '#3b2919';
+  ctx.font = 'bold 26px "Trebuchet MS", sans-serif';
+  ctx.textAlign = 'center';
+  const totalCm = 30;
+  const step = W / totalCm;
+  for (let i = 0; i <= totalCm * 2; i++) {
+    const x = i * (step / 2);
+    const isMajor = i % 2 === 0;
+    const tickH = isMajor ? 42 : 22;
+    ctx.fillRect(x - 1.5, 0, isMajor ? 3 : 2, tickH);
+    ctx.fillRect(x - 1.5, H - tickH, isMajor ? 3 : 2, tickH);
+    if (isMajor && i > 0 && i < totalCm * 2) {
+      ctx.fillText(String(i / 2), x, 68);
+      ctx.fillText(String(i / 2), x, H - 52);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** 在赛道上构建巨物尺度反差奇观：60m 刻度木直尺立交桥 + 25m 巨型信封隧道 + 精装书峡谷 */
 function buildStoryLandmarks(
   spec: TrackSpec,
   curve: THREE.CatmullRomCurve3,
@@ -93,124 +134,143 @@ function buildStoryLandmarks(
 ): void {
   if (spec.theme !== 'meadow') return;
 
-  const span = half + 3.2;
-
-  // ★ 分镜 1：桥下横穿赛道的蓝色剪纸波浪溪流 + 小纸船（位于 t = 0.17 高架桥正下方）
+  // ★ 奇观 1：60 米带刻度木头直尺高架立交桥（位于 8 字形上层立交正中 t ≈ 0.54）
   {
-    const p = curve.getPointAt(0.17);
-    const tg = curve.getTangentAt(0.17);
+    // 寻找上层最高点（y > 11）作为直尺中心
+    let topT = 0.54;
+    let maxY = -Infinity;
+    for (let i = 0; i < 200; i++) {
+      const t = i / 200;
+      const pt = curve.getPointAt(t);
+      if (pt.y > maxY) {
+        maxY = pt.y;
+        topT = t;
+      }
+    }
+    const p = curve.getPointAt(topT);
+    const tg = curve.getTangentAt(topT);
     const heading = Math.atan2(tg.x, tg.z);
-    const stream = new THREE.Group();
-    stream.position.set(p.x, 0.08, p.z);
-    stream.rotation.y = heading;
 
-    // 宽阔浅蓝水带 + 两侧米白纸河岸
-    const water = new THREE.Mesh(
-      new THREE.PlaneGeometry(110, 14),
-      createPaperMaterial(0x7ccbf2, undefined, 0.6)
-    );
-    water.rotation.x = -Math.PI / 2;
-    water.receiveShadow = true;
-    stream.add(water);
+    const rulerGroup = new THREE.Group();
+    rulerGroup.position.set(p.x, p.y + 0.08, p.z);
+    rulerGroup.rotation.y = heading;
 
-    for (const zSide of [-7.4, 7.4]) {
-      const bank = new THREE.Mesh(
-        new THREE.BoxGeometry(110, 0.25, 1.2),
-        createPaperMaterial(0xefe4cc, undefined, 0.92)
-      );
-      bank.position.set(0, 0.12, zSide);
-      stream.add(bank);
-    }
-
-    // 溪流上飘着 3 只白色折纸小纸船
-    for (const bx of [-24, 18, 34]) {
-      const boat = new THREE.Group();
-      const hull = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.6, 1.0, 0.8, 4),
-        createPaperMaterial(0xfffdf8, undefined, 0.9)
-      );
-      hull.rotation.y = Math.PI / 4;
-      hull.scale.set(0.7, 1, 1.45);
-      hull.position.y = 0.45;
-      hull.castShadow = true;
-      boat.add(hull);
-      const sail = new THREE.Mesh(
-        new THREE.ConeGeometry(0.9, 1.9, 3),
-        createPaperMaterial(0xe05a47, undefined, 0.9)
-      );
-      sail.scale.set(0.35, 1, 1.15);
-      sail.position.y = 1.5;
-      boat.add(sail);
-      boat.position.set(bx, 0.1, (bx % 2 === 0 ? 1 : -1) * 2.2);
-      boat.rotation.y = Math.PI / 2;
-      stream.add(boat);
-    }
-    group.add(stream);
+    const rulerMat = new THREE.MeshStandardMaterial({
+      map: createWoodRulerTexture(),
+      roughness: 0.78,
+      metalness: 0.04,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
+    });
+    const sideMat = createPaperMaterial(0xc69652, undefined, 0.85);
+    const rulerGeo = new THREE.BoxGeometry(half * 2 + 2.4, 0.9, 64);
+    const rulerMesh = new THREE.Mesh(rulerGeo, [
+      sideMat, sideMat, rulerMat, sideMat, sideMat, sideMat,
+    ]);
+    rulerMesh.position.y = -0.35;
+    rulerMesh.castShadow = true;
+    rulerMesh.receiveShadow = true;
+    rulerGroup.add(rulerMesh);
+    group.add(rulerGroup);
   }
 
-  // ★ 分镜 2：6 连彩色折纸花环拱廊隧道（t = 0.34 -> 0.45，玩家直接从拱门里穿过去！）
+  // ★ 奇观 2：25 米巨型敞开牛皮纸信封隧道（位于右侧直道 t = 0.31，车直接钻进去！）
   {
-    const archColors = [0xe05a47, 0xf4d35e, 0x8eb87a, 0x4b8ab0, 0xf4a6b8, 0xff9f1c];
-    for (let i = 0; i < 6; i++) {
-      const t = 0.34 + i * 0.022;
+    const p = curve.getPointAt(0.31);
+    const tg = curve.getTangentAt(0.31);
+    const heading = Math.atan2(tg.x, tg.z);
+
+    const env = new THREE.Group();
+    env.position.set(p.x, p.y, p.z);
+    env.rotation.y = heading;
+
+    const w = half * 2 + 6;
+    const h = 16;
+    const len = 38;
+    const kraftOuter = createPaperMaterial(0xdcb98a, undefined, 0.92);
+    const kraftInner = createPaperMaterial(0xf5e8cf, undefined, 0.94);
+    kraftOuter.side = THREE.DoubleSide;
+    kraftInner.side = THREE.DoubleSide;
+
+    // 左右信封厚墙 + 顶部信封背盖
+    for (const s of [-1, 1]) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(1.4, h, len), kraftOuter);
+      wall.position.set(s * (w / 2), h / 2, 0);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      env.add(wall);
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 1.4, 1.2, len), kraftInner);
+    roof.position.set(0, h, 0);
+    roof.castShadow = true;
+    env.add(roof);
+
+    // 入口与出口上扬的巨大三角形信封掀盖 + 巨型红色火漆印章
+    for (const zSign of [-1, 1]) {
+      const flapGeo = new THREE.ConeGeometry(w * 0.56, 12, 3);
+      flapGeo.scale(1.0, 1.0, 0.08);
+      const flap = new THREE.Mesh(flapGeo, kraftOuter);
+      flap.position.set(0, h + 4.8, zSign * (len / 2 + 2.5));
+      flap.rotation.x = zSign * 0.42;
+      flap.castShadow = true;
+      env.add(flap);
+
+      // 巨型红火漆印章
+      const seal = new THREE.Mesh(
+        new THREE.CylinderGeometry(2.6, 2.8, 0.65, 16),
+        createPaperMaterial(0xd94336, undefined, 0.65)
+      );
+      seal.rotation.x = Math.PI / 2;
+      seal.position.set(0, h + 1.4, zSign * (len / 2 + 1.1));
+      env.add(seal);
+    }
+
+    group.add(env);
+  }
+
+  // ★ 奇观 3：堆叠巨型精装书大峡谷（位于左侧大弯 t = 0.75 ~ 0.85 两侧，巨物尺度反差！）
+  {
+    const bookColors = [0x264b42, 0x8f3430, 0x2a4066, 0xc7923c, 0x5c426e];
+    const pageMat = createPaperMaterial(0xf8f0dc, undefined, 0.92);
+    const goldMat = createPaperMaterial(0xe6c170, undefined, 0.45);
+
+    const canyonTs = [0.74, 0.78, 0.82, 0.86];
+    canyonTs.forEach((t, idx) => {
       const p = curve.getPointAt(t);
       const tg = curve.getTangentAt(t);
+      const n = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
       const heading = Math.atan2(tg.x, tg.z);
 
-      const arch = new THREE.Group();
-      arch.position.copy(p);
-      arch.rotation.y = heading;
+      for (const side of [-1, 1]) {
+        const stackCount = 2 + ((idx + (side > 0 ? 1 : 0)) % 2);
+        let curY = 0;
+        for (let b = 0; b < stackCount; b++) {
+          const bw = 18 - b * 2.5;
+          const bh = 6.5 + (b % 2) * 2.2;
+          const bd = 26 - b * 2;
+          const cMat = createPaperMaterial(bookColors[(idx * 2 + b + (side > 0 ? 1 : 0)) % bookColors.length], undefined, 0.88);
+          const book = new THREE.Mesh(
+            new THREE.BoxGeometry(bw, bh, bd),
+            [pageMat, cMat, cMat, cMat, pageMat, pageMat]
+          );
+          const offsetDist = half + bw * 0.5 + 4.5 + b * 1.2;
+          const pos = p.clone().addScaledVector(n, side * offsetDist);
+          book.position.set(pos.x, curY + bh / 2, pos.z);
+          book.rotation.y = heading + (b - 0.5) * 0.18 * side;
+          book.castShadow = true;
+          book.receiveShadow = true;
+          group.add(book);
 
-      const mat = createPaperMaterial(archColors[i % archColors.length], undefined, 0.9);
-      const archGeo = new THREE.TorusGeometry(span, 0.95, 7, 16, Math.PI);
-      const archMesh = new THREE.Mesh(archGeo, mat);
-      archMesh.position.y = 0.4;
-      archMesh.castShadow = true;
-      archMesh.receiveShadow = true;
-      arch.add(archMesh);
+          // 书脊烫金横条装饰
+          const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.7, bd * 0.7), goldMat);
+          stripe.position.set(-bw / 2 - 0.1, 0, 0);
+          book.add(stripe);
 
-      // 拱门顶部点缀一颗奶白折纸小星花
-      const star = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.9, 0),
-        createPaperMaterial(0xfffdf6, undefined, 0.85)
-      );
-      star.position.y = span + 1.1;
-      arch.add(star);
-
-      group.add(arch);
-    }
-  }
-
-  // ★ 分镜 4：坡顶“绘本画框俯冲门”（t = 0.85，穿过画框一路俯冲冲向终点）
-  {
-    const p = curve.getPointAt(0.85);
-    const tg = curve.getTangentAt(0.85);
-    const heading = Math.atan2(tg.x, tg.z);
-
-    const frame = new THREE.Group();
-    frame.position.copy(p);
-    frame.rotation.y = heading;
-
-    const frameMat = createPaperMaterial(0xfcf6e8, undefined, 0.9);
-    const goldMat = createPaperMaterial(0xf4d35e, undefined, 0.85);
-    const h = 11.5;
-
-    for (const s of [-1, 1]) {
-      const col = new THREE.Mesh(new THREE.BoxGeometry(1.3, h, 1.3), frameMat);
-      col.position.set(s * span, h / 2, 0);
-      col.castShadow = true;
-      frame.add(col);
-    }
-    const topBar = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 2.6, 1.8, 1.5), frameMat);
-    topBar.position.set(0, h, 0);
-    topBar.castShadow = true;
-    frame.add(topBar);
-
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 1.2, 0.45, 1.65), goldMat);
-    trim.position.set(0, h - 0.85, 0);
-    frame.add(trim);
-
-    group.add(frame);
+          curY += bh;
+        }
+      }
+    });
   }
 }
 
@@ -734,19 +794,23 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
 
   const query = (pos: THREE.Vector3): TrackQueryResult => {
     let best = 0;
-    let bestD = Infinity;
+    let bestScore = Infinity;
+    let bestHorizSq = Infinity;
     for (let i = 0; i < ROAD_SAMPLES; i++) {
       const dx = samples[i].x - pos.x;
+      const dy = samples[i].y - pos.y;
       const dz = samples[i].z - pos.z;
-      const d = dx * dx + dz * dz;
-      if (d < bestD) {
-        bestD = d;
+      const horizSq = dx * dx + dz * dz;
+      const score = horizSq + dy * dy * 4.0;
+      if (score < bestScore) {
+        bestScore = score;
+        bestHorizSq = horizSq;
         best = i;
       }
     }
     return {
       t: best / ROAD_SAMPLES,
-      dist: Math.sqrt(bestD),
+      dist: Math.sqrt(bestHorizSq),
       point: samples[best],
       tangent: tangents[best],
     };
