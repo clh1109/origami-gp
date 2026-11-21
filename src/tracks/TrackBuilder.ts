@@ -84,6 +84,136 @@ function boostArrowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+/** 在赛道样条上构建可穿行的立体书故事分镜（跨溪蓝河 / 彩色拱门隧道 / 坡顶绘本画框） */
+function buildStoryLandmarks(
+  spec: TrackSpec,
+  curve: THREE.CatmullRomCurve3,
+  half: number,
+  group: THREE.Group
+): void {
+  if (spec.theme !== 'meadow') return;
+
+  const span = half + 3.2;
+
+  // ★ 分镜 1：桥下横穿赛道的蓝色剪纸波浪溪流 + 小纸船（位于 t = 0.17 高架桥正下方）
+  {
+    const p = curve.getPointAt(0.17);
+    const tg = curve.getTangentAt(0.17);
+    const heading = Math.atan2(tg.x, tg.z);
+    const stream = new THREE.Group();
+    stream.position.set(p.x, 0.08, p.z);
+    stream.rotation.y = heading;
+
+    // 宽阔浅蓝水带 + 两侧米白纸河岸
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(110, 14),
+      createPaperMaterial(0x7ccbf2, undefined, 0.6)
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.receiveShadow = true;
+    stream.add(water);
+
+    for (const zSide of [-7.4, 7.4]) {
+      const bank = new THREE.Mesh(
+        new THREE.BoxGeometry(110, 0.25, 1.2),
+        createPaperMaterial(0xefe4cc, undefined, 0.92)
+      );
+      bank.position.set(0, 0.12, zSide);
+      stream.add(bank);
+    }
+
+    // 溪流上飘着 3 只白色折纸小纸船
+    for (const bx of [-24, 18, 34]) {
+      const boat = new THREE.Group();
+      const hull = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.6, 1.0, 0.8, 4),
+        createPaperMaterial(0xfffdf8, undefined, 0.9)
+      );
+      hull.rotation.y = Math.PI / 4;
+      hull.scale.set(0.7, 1, 1.45);
+      hull.position.y = 0.45;
+      hull.castShadow = true;
+      boat.add(hull);
+      const sail = new THREE.Mesh(
+        new THREE.ConeGeometry(0.9, 1.9, 3),
+        createPaperMaterial(0xe05a47, undefined, 0.9)
+      );
+      sail.scale.set(0.35, 1, 1.15);
+      sail.position.y = 1.5;
+      boat.add(sail);
+      boat.position.set(bx, 0.1, (bx % 2 === 0 ? 1 : -1) * 2.2);
+      boat.rotation.y = Math.PI / 2;
+      stream.add(boat);
+    }
+    group.add(stream);
+  }
+
+  // ★ 分镜 2：6 连彩色折纸花环拱廊隧道（t = 0.34 -> 0.45，玩家直接从拱门里穿过去！）
+  {
+    const archColors = [0xe05a47, 0xf4d35e, 0x8eb87a, 0x4b8ab0, 0xf4a6b8, 0xff9f1c];
+    for (let i = 0; i < 6; i++) {
+      const t = 0.34 + i * 0.022;
+      const p = curve.getPointAt(t);
+      const tg = curve.getTangentAt(t);
+      const heading = Math.atan2(tg.x, tg.z);
+
+      const arch = new THREE.Group();
+      arch.position.copy(p);
+      arch.rotation.y = heading;
+
+      const mat = createPaperMaterial(archColors[i % archColors.length], undefined, 0.9);
+      const archGeo = new THREE.TorusGeometry(span, 0.95, 7, 16, Math.PI);
+      const archMesh = new THREE.Mesh(archGeo, mat);
+      archMesh.position.y = 0.4;
+      archMesh.castShadow = true;
+      archMesh.receiveShadow = true;
+      arch.add(archMesh);
+
+      // 拱门顶部点缀一颗奶白折纸小星花
+      const star = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.9, 0),
+        createPaperMaterial(0xfffdf6, undefined, 0.85)
+      );
+      star.position.y = span + 1.1;
+      arch.add(star);
+
+      group.add(arch);
+    }
+  }
+
+  // ★ 分镜 4：坡顶“绘本画框俯冲门”（t = 0.85，穿过画框一路俯冲冲向终点）
+  {
+    const p = curve.getPointAt(0.85);
+    const tg = curve.getTangentAt(0.85);
+    const heading = Math.atan2(tg.x, tg.z);
+
+    const frame = new THREE.Group();
+    frame.position.copy(p);
+    frame.rotation.y = heading;
+
+    const frameMat = createPaperMaterial(0xfcf6e8, undefined, 0.9);
+    const goldMat = createPaperMaterial(0xf4d35e, undefined, 0.85);
+    const h = 11.5;
+
+    for (const s of [-1, 1]) {
+      const col = new THREE.Mesh(new THREE.BoxGeometry(1.3, h, 1.3), frameMat);
+      col.position.set(s * span, h / 2, 0);
+      col.castShadow = true;
+      frame.add(col);
+    }
+    const topBar = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 2.6, 1.8, 1.5), frameMat);
+    topBar.position.set(0, h, 0);
+    topBar.castShadow = true;
+    frame.add(topBar);
+
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 1.2, 0.45, 1.65), goldMat);
+    trim.position.set(0, h - 0.85, 0);
+    frame.add(trim);
+
+    group.add(frame);
+  }
+}
+
 export function buildTrack(spec: TrackSpec): TrackBuildResult {
   const group = new THREE.Group();
   const pts = spec.points.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
@@ -621,6 +751,8 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
       tangent: tangents[best],
     };
   };
+
+  buildStoryLandmarks(spec, curve, half, group);
 
   return {
     group,
