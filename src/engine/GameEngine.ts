@@ -8,6 +8,7 @@ import { buildEnvironment, buildGround, updateClouds, type EnvironmentResult } f
 import { updatePopupProps, popAllInstant } from '../models/PopupPropBuilder';
 import { buildCar } from '../models/CarBuilder';
 import { BookIntroCinematic } from '../models/BookIntroCinematic';
+import { CraneRescueController } from '../models/CraneRescue';
 import { stepCarPhysics, resolveCarCollisions, computeOffroad } from '../gameplay/PhysicsSystem';
 import { computeAIInput } from '../gameplay/AIController';
 import { GhostRecorder, GhostPlayer, loadBestGhost, saveBestGhost } from '../gameplay/GhostRecorder';
@@ -68,6 +69,7 @@ export class GameEngine {
   private pedestal: THREE.Group | null = null;
   private showcaseCar: CarRuntimeState | null = null;
   private bookIntro: BookIntroCinematic | null = null;
+  private craneRescue: CraneRescueController;
   hasPlayedIntro = false;
 
   private time = 0;
@@ -92,6 +94,7 @@ export class GameEngine {
     this.rig = new CameraRig(this.sm.camera);
     this.audio = new AudioEngine();
     this.particles = new ParticleSystem(this.sm.scene);
+    this.craneRescue = new CraneRescueController(this.sm.scene);
     this.bindInput();
     window.addEventListener('resize', this.onResize);
   }
@@ -106,6 +109,15 @@ export class GameEngine {
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift'].includes(k)) e.preventDefault();
     this.keys.add(k);
     if (k === 'e' || k === 'f' || k === 'enter') this.itemRequested = true;
+    if (k === 'r' && this.phase === 'racing' && this.player && this.track && !this.craneRescue.isActive) {
+      const q = this.track.query(this.player.pos);
+      const safePos = this.track.curve.getPointAt(q.t);
+      const safeTg = this.track.curve.getTangentAt(q.t);
+      const safeHeading = Math.atan2(safeTg.x, safeTg.z);
+      this.craneRescue.trigger(this.player, safePos, safeHeading, (p) =>
+        this.particles.emitSparkle(p, 0xffd166, 12)
+      );
+    }
     this.audio.ensure();
   };
   private onKeyUp = (e: KeyboardEvent): void => {
@@ -239,6 +251,7 @@ export class GameEngine {
 
   // ================= 大厅 =================
   enterLobby(config: RaceConfig, step: LobbyStep): void {
+    this.craneRescue.reset();
     this.config = config;
     this.mode = config.mode;
     this.phase = 'lobby';
@@ -327,6 +340,7 @@ export class GameEngine {
   // ================= 比赛 =================
   startRace(config: RaceConfig): void {
     this.bookIntro?.finish();
+    this.craneRescue.reset();
     this.config = config;
     this.mode = config.mode;
     this.clearCars();
@@ -538,6 +552,10 @@ export class GameEngine {
 
     for (const car of this.cars) {
       if (car.isGhost) continue;
+      // 玩家正在被千纸鹤运送回赛道时，跳过常规物理与越野判定
+      if (car.isPlayer && this.craneRescue.isCarrying) {
+        continue;
+      }
       let input: PlayerInput;
       if (car.isPlayer) {
         if (this.autopilot) {
@@ -552,6 +570,16 @@ export class GameEngine {
       }
       // 越野判定
       const q = track.query(car.pos);
+      // 玩家偏离赛道超过半路宽 + 11 单位，自动触发千纸鹤唯美救援！
+      if (car.isPlayer && !this.craneRescue.isActive && q.dist > track.width * 0.5 + 11) {
+        const safePos = track.curve.getPointAt(q.t);
+        const safeTg = track.curve.getTangentAt(q.t);
+        const safeHeading = Math.atan2(safeTg.x, safeTg.z);
+        this.craneRescue.trigger(car, safePos, safeHeading, (p) =>
+          this.particles.emitSparkle(p, 0xffd166, 12)
+        );
+        continue;
+      }
       car.offroad = computeOffroad(car, q.dist, track.width / 2);
       stepCarPhysics(car, input, dt);
       this.groundFollow(car, q, dt);
@@ -623,6 +651,8 @@ export class GameEngine {
       }
       if (car.boostTimer > 0) this.particles.emitBoost(car.pos, car.heading, car.isPlayer ? 3 : 1);
     }
+
+    this.craneRescue.update(dt, (p) => this.particles.emitSparkle(p, 0xffd166, 10));
 
     // 碰撞
     const collisions = resolveCarCollisions(this.cars);
@@ -838,6 +868,7 @@ export class GameEngine {
   dispose(): void {
     this.disposed = true;
     this.bookIntro?.dispose();
+    this.craneRescue.dispose();
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.onKeyDown);
