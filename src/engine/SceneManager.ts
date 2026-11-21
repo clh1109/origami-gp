@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { N8AOPass } from 'n8ao';
 import type { TrackColors } from '../types/game';
 import { makeTiltShiftPass, makeBloomPass, setTiltResolution, setTiltFocus } from './PostFX';
@@ -25,6 +26,7 @@ export class SceneManager {
   renderPass: RenderPass;
   outputPass: OutputPass;
   bloomPass: UnrealBloomPass;
+  smaaPass: SMAAPass;
   tiltH: ShaderPass;
   tiltV: ShaderPass;
 
@@ -48,7 +50,8 @@ export class SceneManager {
       powerPreference: 'high-performance',
       stencil: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    this.renderer.setPixelRatio(dpr);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0; // 从 1.15 回调，保留纸面高光细节不发白
     this.renderer.shadowMap.enabled = true;
@@ -96,23 +99,24 @@ export class SceneManager {
     this.ambient = new THREE.AmbientLight(0xffffff, 0.0);
     this.scene.add(this.ambient);
 
-    // 后处理管线
+    // 后处理管线：同步高分屏像素比，消除拉大发糊
     this.composer = new EffectComposer(this.renderer);
+    this.composer.setPixelRatio(dpr);
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.renderPass.enabled = false;
     this.composer.addPass(this.renderPass);
 
-    // 收紧 AO 半径并提高强度，专门强化折纸凹缝与贴地接触阴影
+    // 收紧 AO 半径并提高强度，N8AO 改为全分辨率（关掉 halfRes），消除暗部马赛克块
     this.n8aoPass = new N8AOPass(this.scene, this.camera, window.innerWidth, window.innerHeight);
     this.n8aoPass.configuration.aoRadius = 0.65;
     this.n8aoPass.configuration.intensity = 1.55;
     this.n8aoPass.configuration.distanceFalloff = 1.0;
     this.n8aoPass.configuration.denoiseSamples = 8;
     this.n8aoPass.configuration.denoiseRadius = 8;
-    this.n8aoPass.configuration.halfRes = true;
-    this.n8aoPass.configuration.depthAwareUpsampling = true;
+    this.n8aoPass.configuration.halfRes = false;
+    this.n8aoPass.configuration.depthAwareUpsampling = false;
     this.n8aoPass.configuration.gammaCorrection = false;
-    this.n8aoPass.setQualityMode('Medium');
+    this.n8aoPass.setQualityMode('High');
     this.composer.addPass(this.n8aoPass);
 
     // 限制 Bloom 阈值，只让自发光道具/加速带泛光，不让白纸发糊
@@ -126,6 +130,10 @@ export class SceneManager {
     this.tiltV = makeTiltShiftPass(false, true);
     this.composer.addPass(this.tiltH);
     this.composer.addPass(this.tiltV);
+
+    // 挂载电影级 SMAA 抗锯齿（在 OutputPass 之前以 Linear 线性色彩空间执行边缘平滑）
+    this.smaaPass = new SMAAPass(window.innerWidth * dpr, window.innerHeight * dpr);
+    this.composer.addPass(this.smaaPass);
 
     this.outputPass = new OutputPass();
     this.composer.addPass(this.outputPass);
@@ -171,6 +179,7 @@ export class SceneManager {
     this.n8aoPass.enabled = on;
     this.renderPass.enabled = !on;
     this.bloomPass.enabled = on;
+    this.smaaPass.enabled = on;
   }
 
   setDofFocus(y: number): void {
@@ -198,13 +207,15 @@ export class SceneManager {
   }
 
   resize(width: number, height: number): void {
+    const dpr = Math.min(window.devicePixelRatio, 2);
     this.width = Math.max(1, width);
     this.height = Math.max(1, height);
+    this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(this.width, this.height, false);
+    this.composer.setPixelRatio(dpr);
     this.composer.setSize(this.width, this.height);
-    this.n8aoPass.setSize(this.width, this.height);
-    this.bloomPass.setSize(this.width, this.height);
-    setTiltResolution([this.tiltH, this.tiltV], this.width, this.height);
+    this.smaaPass.setSize(this.width * dpr, this.height * dpr);
+    setTiltResolution([this.tiltH, this.tiltV], this.width * dpr, this.height * dpr);
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
   }
@@ -222,6 +233,7 @@ export class SceneManager {
     this.disposed = true;
     this.composer.dispose?.();
     this.n8aoPass.dispose?.();
+    this.smaaPass.dispose?.();
     this.renderer.dispose();
   }
 }
