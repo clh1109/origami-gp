@@ -31,11 +31,6 @@ function buildLayeredWaveMountains(
   ];
 
   const SEGMENTS = 96;
-  const ridgeEdgeMat = new THREE.LineBasicMaterial({
-    color: night ? 0x7b92c4 : 0xfffaf0,
-    transparent: true,
-    opacity: night ? 0.35 : 0.55,
-  });
 
   for (const cfg of layerConfigs) {
     const r = baseR + cfg.radiusOffset;
@@ -44,7 +39,6 @@ function buildLayeredWaveMountains(
     mat.side = THREE.DoubleSide;
 
     const positions: number[] = [];
-    const ridgePoints: THREE.Vector3[] = [];
     const indices: number[] = [];
 
     for (let i = 0; i <= SEGMENTS; i++) {
@@ -60,7 +54,6 @@ function buildLayeredWaveMountains(
 
       positions.push(x, 0, z);
       positions.push(x, h, z);
-      ridgePoints.push(new THREE.Vector3(x, h + 0.08, z));
 
       if (i < SEGMENTS) {
         const v = i * 2;
@@ -79,11 +72,6 @@ function buildLayeredWaveMountains(
     layerMesh.castShadow = cfg.ring < 2 && !night;
     layerMesh.receiveShadow = cfg.ring > 0;
     mountainGroup.add(layerMesh);
-
-    // 顶部剪纸裁切米白亮边，强化立体纸雕灯箱的层次感
-    const ridgeGeo = new THREE.BufferGeometry().setFromPoints(ridgePoints);
-    const ridgeLine = new THREE.Line(ridgeGeo, ridgeEdgeMat);
-    mountainGroup.add(ridgeLine);
   }
 
   return mountainGroup;

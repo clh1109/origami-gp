@@ -204,19 +204,10 @@ export function createTranslucentPaper(
   });
 }
 
-export function attachOrigamiEdges(mesh: THREE.Mesh, thresholdAngle = 24, light = true): THREE.Mesh {
+export function attachOrigamiEdges(mesh: THREE.Mesh, _thresholdAngle = 24, _light = true): THREE.Mesh {
   ensureBoxUV(mesh.geometry);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-
-  // 避免重复挂载折痕线
-  if (!mesh.userData.__origamiEdgesAdded) {
-    const edges = new THREE.EdgesGeometry(mesh.geometry, thresholdAngle);
-    const line = new THREE.LineSegments(edges, light ? CREASE_HIGHLIGHT_MAT : SHARED_EDGE_MAT);
-    line.renderOrder = 1;
-    mesh.add(line);
-    mesh.userData.__origamiEdgesAdded = true;
-  }
   return mesh;
 }
 
