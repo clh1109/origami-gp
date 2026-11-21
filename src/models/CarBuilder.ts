@@ -5,7 +5,6 @@ import {
   createTexturedPaperMaterial,
   createTranslucentPaper,
   createEmissivePaper,
-  attachOrigamiEdges,
   ensureBoxUV,
 } from '../materials/PaperMaterial';
 
@@ -30,8 +29,9 @@ const RACER_NUMBER_MAP: Record<string, string> = {
 
 let cachedShadowTex: THREE.CanvasTexture | null = null;
 const badgeTexCache = new Map<string, THREE.CanvasTexture>();
+let cachedBodyGeo: THREE.BufferGeometry | null = null;
 
-/** 柔边径向渐变接触阴影贴图（替代硬边黑圆片） */
+/** 柔边径向渐变贴地接触阴影 */
 function getSoftShadowTexture(): THREE.CanvasTexture {
   if (cachedShadowTex) return cachedShadowTex;
   const size = 128;
@@ -39,22 +39,19 @@ function getSoftShadowTexture(): THREE.CanvasTexture {
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-
   const grad = ctx.createRadialGradient(size / 2, size / 2, size * 0.08, size / 2, size / 2, size * 0.48);
-  grad.addColorStop(0, 'rgba(24, 18, 14, 0.46)');
+  grad.addColorStop(0, 'rgba(24, 18, 14, 0.48)');
   grad.addColorStop(0.55, 'rgba(24, 18, 14, 0.22)');
   grad.addColorStop(1, 'rgba(24, 18, 14, 0.0)');
-
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
-
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   cachedShadowTex = tex;
   return tex;
 }
 
-/** 手工圆底赛车编号贴纸（带虚线缝线与白边） */
+/** 圆底手账赛车编号贴纸 */
 function getNumberBadgeTexture(numText: string, accentHex: number): THREE.CanvasTexture {
   const key = `${numText}-${accentHex}`;
   const hit = badgeTexCache.get(key);
@@ -68,27 +65,14 @@ function getNumberBadgeTexture(numText: string, accentHex: number): THREE.Canvas
   const cx = size / 2;
   const cy = size / 2;
 
-  // 米白剪纸圆底
   ctx.beginPath();
   ctx.arc(cx, cy, 58, 0, Math.PI * 2);
   ctx.fillStyle = '#fcf8ee';
   ctx.fill();
-
-  // 彩色外圈 + 虚线手账缝边
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 7;
   ctx.strokeStyle = `#${accentHex.toString(16).padStart(6, '0')}`;
   ctx.stroke();
 
-  ctx.save();
-  ctx.setLineDash([7, 6]);
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = 'rgba(72, 54, 42, 0.35)';
-  ctx.beginPath();
-  ctx.arc(cx, cy, 48, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
-
-  // 手绘感粗体编号
   ctx.fillStyle = '#2d221c';
   ctx.font = '900 54px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
   ctx.textAlign = 'center';
@@ -101,62 +85,106 @@ function getNumberBadgeTexture(numText: string, accentHex: number): THREE.Canvas
   return tex;
 }
 
-function finalizePart(mesh: THREE.Mesh, ghost: boolean, threshold = 24, lightEdge = true): THREE.Mesh {
-  ensureBoxUV(mesh.geometry);
-  mesh.castShadow = !ghost;
-  mesh.receiveShadow = !ghost;
-  if (!ghost) {
-    attachOrigamiEdges(mesh, threshold, lightEdge);
-  }
-  return mesh;
+/** 平滑温润纸质材质（用于圆润车壳与 Q 版车手头雕，避免低模碎三角感） */
+function makeSmoothPaperMat(color: number, ghost: boolean, roughness = 0.88): THREE.MeshStandardMaterial {
+  if (ghost) return createTranslucentPaper(color, 0.35);
+  const mat = createPaperMaterial(color, undefined, roughness);
+  mat.flatShading = false;
+  return mat;
 }
 
-/** 叠层圆卡纸车轮：炭灰纸胎 + 奶油白内凹轮毂 + 十字卡纸辐条 + 彩色纸铆钉 */
-function makeWheel(accent: number, ghost: boolean): { spin: THREE.Group; mesh: THREE.Mesh } {
+/** 挺括折纸切面材质（用于耳朵、围巾、尾翼、小船帽等折纸配饰） */
+function makeCrispPaperMat(color: number, ghost: boolean, roughness = 0.9): THREE.MeshStandardMaterial {
+  if (ghost) return createTranslucentPaper(color, 0.35);
+  return createPaperMaterial(color, undefined, roughness);
+}
+
+/**
+ * 贝塞尔侧轮廓 + 圆角倒角挤出的一体式复古胖卡丁车壳
+ * 局部坐标：+Z 为车头，-Z 为车尾，零接缝且自带饱满圆角
+ */
+function getCozyKartBodyGeo(): THREE.BufferGeometry {
+  if (cachedBodyGeo) return cachedBodyGeo;
+
+  const shape = new THREE.Shape();
+  // 在 2D 平面画侧轮廓：x 对应世界 +Z（-1.65 车尾 -> +1.85 车头），y 对应高度
+  shape.moveTo(-1.62, 0.24);
+  shape.lineTo(1.55, 0.24);
+  // 圆润低伏车头鼻尖
+  shape.bezierCurveTo(1.92, 0.24, 1.98, 0.56, 1.62, 0.72);
+  // 流畅上扬的引擎盖
+  shape.bezierCurveTo(1.22, 0.88, 0.82, 0.92, 0.46, 0.88);
+  // 座舱凹口曲线
+  shape.bezierCurveTo(0.18, 0.74, -0.45, 0.74, -0.78, 0.94);
+  // 饱满圆润的复古车尾驼峰
+  shape.bezierCurveTo(-1.18, 1.06, -1.62, 0.96, -1.72, 0.62);
+  shape.bezierCurveTo(-1.76, 0.42, -1.72, 0.24, -1.62, 0.24);
+
+  const depth = 1.18;
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: true,
+    bevelThickness: 0.24,
+    bevelSize: 0.18,
+    bevelSegments: 4,
+    curveSegments: 18,
+  });
+  // 沿挤出轴居中，再绕 Y 轴旋 -90° 让 2D 的 +x 精准朝向世界 +Z（车头）
+  geo.translate(0, 0, -depth / 2);
+  geo.rotateY(-Math.PI / 2);
+  geo.computeVertexNormals();
+  ensureBoxUV(geo, 0.42);
+  cachedBodyGeo = geo;
+  return geo;
+}
+
+/** 敦实宽厚的大圆角玩具轮胎（深炭灰圆肩胎皮 + 奶油白轮毂 + 撞色铆钉） */
+function makeChunkyWheel(accent: number, ghost: boolean): { spin: THREE.Group; mesh: THREE.Mesh } {
   const spin = new THREE.Group();
 
-  const tireColor = ghost ? 0x484c56 : 0x343840;
-  const tireMat = ghost ? createTranslucentPaper(tireColor, 0.35) : createPaperMaterial(tireColor, undefined, 0.94);
-  const tireGeo = new THREE.CylinderGeometry(0.56, 0.56, 0.44, 14);
-  const tire = finalizePart(new THREE.Mesh(tireGeo, tireMat), ghost, 22, true);
+  const tireMat = makeSmoothPaperMat(ghost ? 0x484c56 : 0x2f333b, ghost, 0.92);
+  const hubMat = makeSmoothPaperMat(0xfdf8ec, ghost, 0.86);
+  const capMat = makeSmoothPaperMat(accent, ghost, 0.82);
+
+  // 主胎面
+  const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.54, 0.48, 20), tireMat);
   tire.rotation.z = Math.PI / 2;
+  tire.castShadow = !ghost;
+  tire.receiveShadow = !ghost;
   spin.add(tire);
 
-  const hubMat = ghost ? createTranslucentPaper(0xfdfaf2, 0.35) : createPaperMaterial(0xfdfaf2, undefined, 0.9);
-  const hubGeo = new THREE.CylinderGeometry(0.41, 0.34, 0.46, 14);
-  const hub = finalizePart(new THREE.Mesh(hubGeo, hubMat), ghost, 26, false);
+  // 两侧圆润胎肩（消除生硬圆柱直角）
+  for (const s of [-1, 1]) {
+    const shoulder = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.11, 8, 20), tireMat);
+    shoulder.rotation.y = Math.PI / 2;
+    shoulder.position.x = s * 0.18;
+    spin.add(shoulder);
+  }
+
+  // 奶油白内凹轮毂盘
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.54, 18), hubMat);
   hub.rotation.z = Math.PI / 2;
   spin.add(hub);
 
-  // 十字剪纸辐条（让轮子转动时的动态更明显）
-  const spokeMat = ghost ? createTranslucentPaper(0xdccbb2, 0.35) : createPaperMaterial(0xdccbb2, undefined, 0.92);
-  for (let i = 0; i < 2; i++) {
-    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.475, 0.58, 0.1), spokeMat);
-    spoke.rotation.x = (i * Math.PI) / 2;
-    spin.add(spoke);
+  // 4 颗小圆装饰钉（让车轮转动更直观可爱）
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const lug = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.57, 8), tireMat);
+    lug.rotation.z = Math.PI / 2;
+    lug.position.set(0, Math.cos(a) * 0.22, Math.sin(a) * 0.22);
+    spin.add(lug);
   }
 
-  // 中心撞色纸铆钉
-  const dotMat = ghost ? createTranslucentPaper(accent, 0.35) : createPaperMaterial(accent, undefined, 0.85);
-  const dotGeo = new THREE.CylinderGeometry(0.16, 0.13, 0.5, 8);
-  const dot = finalizePart(new THREE.Mesh(dotGeo, dotMat), ghost, 26, true);
-  dot.rotation.z = Math.PI / 2;
-  spin.add(dot);
+  // 撞色中心轴盖
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.58, 12), capMat);
+  cap.rotation.z = Math.PI / 2;
+  spin.add(cap);
 
   return { spin, mesh: tire };
 }
 
-/** 弯曲冲压折纸轮拱 / 挡泥板 */
-function createWheelFender(primaryMat: THREE.Material, ghost: boolean, isLeft: boolean): THREE.Mesh {
-  const fenderGeo = new THREE.CylinderGeometry(0.72, 0.72, 0.5, 8, 1, true, 0, Math.PI);
-  fenderGeo.rotateZ(Math.PI / 2);
-  fenderGeo.rotateY(isLeft ? 0 : Math.PI);
-  const fender = finalizePart(new THREE.Mesh(fenderGeo, primaryMat), ghost, 20, true);
-  return fender;
-}
-
-/** 流线型折纸赛车底盘（带牛皮纸底裙、白边赛车条纹、圆底编号贴纸、复古圆灯） */
-function buildStreamlinedChassis(
+/** 组装圆润胖卡丁车一体车身（带牛皮纸底裙、引擎盖条纹、编号贴纸、圆灯与双排气） */
+function buildCozyKartBody(
   racer: RacerSpec,
   primaryMat: THREE.Material,
   accentMat: THREE.Material,
@@ -167,412 +195,393 @@ function buildStreamlinedChassis(
 ): THREE.Group {
   const group = new THREE.Group();
 
-  // 0. 瓦楞牛皮纸厚底盘托板（手工模型感的核心锚点）
-  const basePlateGeo = new THREE.BoxGeometry(1.48, 0.14, 4.35);
-  const basePlate = finalizePart(new THREE.Mesh(basePlateGeo, kraftMat), ghost, 20, true);
-  basePlate.position.set(0, 0.24, 0.08);
-  group.add(basePlate);
+  // 1. 一体式圆角贝塞尔胖车壳
+  const body = new THREE.Mesh(getCozyKartBodyGeo(), primaryMat);
+  body.castShadow = !ghost;
+  body.receiveShadow = !ghost;
+  group.add(body);
 
-  // 1. 流线型下压车头机盖
-  const hoodGeo = new THREE.BufferGeometry();
-  const hoodVerts = [
-    0.0, 0.68, 1.45, -0.58, 0.38, 1.25, 0.0, 0.46, 2.25,
-    0.0, 0.68, 1.45, 0.0, 0.46, 2.25, 0.58, 0.38, 1.25,
-    0.0, 0.46, 2.25, -0.58, 0.38, 1.25, -0.35, 0.32, 2.45,
-    0.0, 0.46, 2.25, -0.35, 0.32, 2.45, 0.0, 0.36, 2.55,
-    0.0, 0.46, 2.25, 0.0, 0.36, 2.55, 0.35, 0.32, 2.45,
-    0.0, 0.46, 2.25, 0.35, 0.32, 2.45, 0.58, 0.38, 1.25,
-    0.0, 0.68, 1.45, -0.62, 0.58, 0.45, -0.58, 0.38, 1.25,
-    0.0, 0.68, 1.45, 0.58, 0.38, 1.25, 0.62, 0.58, 0.45,
-    0.0, 0.68, 1.45, 0.0, 0.82, 0.42, -0.62, 0.58, 0.45,
-    0.0, 0.68, 1.45, 0.62, 0.58, 0.45, 0.0, 0.82, 0.42,
-  ];
-  hoodGeo.setAttribute('position', new THREE.Float32BufferAttribute(hoodVerts, 3));
-  hoodGeo.computeVertexNormals();
-  group.add(finalizePart(new THREE.Mesh(hoodGeo, primaryMat), ghost, 18, true));
+  // 2. 紧凑牛皮纸底盘围边（增加厚卡纸手工玩具质感）
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.16, 3.25), kraftMat);
+  base.position.set(0, 0.28, 0.05);
+  base.castShadow = !ghost;
+  base.receiveShadow = !ghost;
+  group.add(base);
 
-  // 车头奶白纸贴条 + 编号圆贴纸
+  // 前后圆润防撞保险杠
+  const frontBumper = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 1.18, 6, 10), creamMat);
+  frontBumper.rotation.z = Math.PI / 2;
+  frontBumper.position.set(0, 0.34, 1.94);
+  frontBumper.castShadow = !ghost;
+  group.add(frontBumper);
+
+  const rearBumper = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 1.22, 6, 10), creamMat);
+  rearBumper.rotation.z = Math.PI / 2;
+  rearBumper.position.set(0, 0.36, -1.78);
+  rearBumper.castShadow = !ghost;
+  group.add(rearBumper);
+
+  // 3. 引擎盖暖白装饰条 + 圆底编号贴纸 + 复古双圆大灯
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 1.2), creamMat);
+  stripe.position.set(0, 0.99, 1.05);
+  stripe.rotation.x = 0.18;
+  group.add(stripe);
+
   if (!ghost) {
     const numText = RACER_NUMBER_MAP[racer.id] ?? '01';
     const badgeMat = createTexturedPaperMaterial(getNumberBadgeTexture(numText, racer.accentColor));
     badgeMat.polygonOffset = true;
     badgeMat.polygonOffsetFactor = -2;
-    const hoodBadge = new THREE.Mesh(new THREE.CircleGeometry(0.32, 16), badgeMat);
-    hoodBadge.position.set(0, 0.63, 1.58);
-    hoodBadge.rotation.x = -Math.PI / 2 + 0.27;
+
+    // 车头编号贴纸
+    const hoodBadge = new THREE.Mesh(new THREE.CircleGeometry(0.32, 18), badgeMat);
+    hoodBadge.position.set(0, 1.03, 1.18);
+    hoodBadge.rotation.x = -Math.PI / 2 + 0.24;
     group.add(hoodBadge);
 
-    // 车头复古双圆大灯（纸框 + 暖黄发光灯芯）
-    const lampGlow = createEmissivePaper(0xfff6cf, 0xffe082, 1.1);
-    for (const s of [-1, 1]) {
-      const bezel = finalizePart(
-        new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.14, 10), creamMat),
-        false,
-        24,
-        false
-      );
-      bezel.rotation.x = Math.PI / 2;
-      bezel.position.set(s * 0.44, 0.48, 2.02);
-      bezel.rotation.y = s * 0.16;
-      group.add(bezel);
+    // 车尾编号贴纸（比赛视角最显眼）
+    const rearBadge = new THREE.Mesh(new THREE.CircleGeometry(0.28, 18), badgeMat);
+    rearBadge.position.set(0, 0.86, -1.89);
+    rearBadge.rotation.y = Math.PI;
+    rearBadge.rotation.x = 0.2;
+    group.add(rearBadge);
 
-      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.12, 10), lampGlow);
-      lens.position.set(s * 0.45, 0.48, 2.1);
-      lens.rotation.y = s * 0.16;
+    // 复古萌系双圆前灯
+    const lampGlow = createEmissivePaper(0xfff6cf, 0xffe082, 1.05);
+    for (const s of [-1, 1]) {
+      const pod = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 10), creamMat);
+      pod.scale.set(1, 1, 0.85);
+      pod.position.set(s * 0.56, 0.72, 1.78);
+      pod.castShadow = true;
+      group.add(pod);
+
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.14, 12), lampGlow);
+      lens.position.set(s * 0.56, 0.72, 1.94);
       group.add(lens);
+    }
+
+    // 车尾复古红圆尾灯
+    const tailGlow = createEmissivePaper(0xff5b4a, 0xff3b2f, 1.1);
+    for (const s of [-1, 1]) {
+      const tLamp = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), tailGlow);
+      tLamp.position.set(s * 0.56, 0.78, -1.84);
+      group.add(tLamp);
     }
   }
 
-  // 2. 座舱两侧可乐瓶收腰侧板 + 车尾流线背板
-  const flankGeo = new THREE.BufferGeometry();
-  const flankVerts = [
-    -0.62, 0.58, 0.45, -0.55, 0.28, 0.45, -0.68, 0.68, -1.25,
-    -0.55, 0.28, 0.45, -0.62, 0.28, -1.25, -0.68, 0.68, -1.25,
-    0.62, 0.58, 0.45, 0.68, 0.68, -1.25, 0.55, 0.28, 0.45,
-    0.55, 0.28, 0.45, 0.68, 0.68, -1.25, 0.62, 0.28, -1.25,
-    0.0, 0.82, -1.35, -0.68, 0.68, -1.25, 0.68, 0.68, -1.25,
-    0.0, 0.82, -1.35, -0.58, 0.42, -2.05, -0.68, 0.68, -1.25,
-    0.0, 0.82, -1.35, 0.68, 0.68, -1.25, 0.58, 0.42, -2.05,
-    0.0, 0.82, -1.35, 0.0, 0.48, -2.12, -0.58, 0.42, -2.05,
-    0.0, 0.82, -1.35, 0.58, 0.42, -2.05, 0.0, 0.48, -2.12,
-  ];
-  flankGeo.setAttribute('position', new THREE.Float32BufferAttribute(flankVerts, 3));
-  flankGeo.computeVertexNormals();
-  group.add(finalizePart(new THREE.Mesh(flankGeo, primaryMat), ghost, 18, true));
-
-  // 3. 四轮拱形挡泥板
-  const fenderPositions: [number, number, number, boolean][] = [
-    [-1.12, 0.6, 1.34, true],
-    [1.12, 0.6, 1.34, false],
-    [-1.12, 0.6, -1.34, true],
-    [1.12, 0.6, -1.34, false],
-  ];
-  for (const [x, y, z, isLeft] of fenderPositions) {
-    const fender = createWheelFender(accentMat, ghost, isLeft);
-    fender.position.set(x, y, z);
-    group.add(fender);
-  }
-
-  // 4. 左右流线型进气侧箱 + 白色装饰条
-  for (const s of [-1, 1]) {
-    const podGeo = new THREE.CylinderGeometry(0.24, 0.32, 1.6, 7);
-    podGeo.rotateX(Math.PI / 2);
-    const pod = finalizePart(new THREE.Mesh(podGeo, primaryMat), ghost, 24, true);
-    pod.position.set(s * 0.94, 0.52, 0.0);
-    pod.scale.set(0.75, 0.9, 1.0);
-    group.add(pod);
-
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 1.25), creamMat);
-    stripe.position.set(s * 1.12, 0.56, -0.05);
-    group.add(stripe);
-
-    const scoopGeo = new THREE.CircleGeometry(0.22, 8);
-    const scoop = new THREE.Mesh(scoopGeo, darkMat);
-    scoop.position.set(s * 0.94, 0.52, 0.81);
-    scoop.scale.set(0.75, 0.9, 1);
-    group.add(scoop);
-  }
-
-  // 5. 座舱、弧形风挡与防滚架
-  const cockpitGeo = new THREE.CylinderGeometry(0.48, 0.42, 0.38, 10);
-  const cockpit = finalizePart(new THREE.Mesh(cockpitGeo, darkMat), ghost, 24, true);
-  cockpit.position.set(0, 0.62, -0.32);
-  cockpit.scale.set(1.15, 1, 1.35);
+  // 4. 座舱内衬 + 小弧形透明挡风玻璃
+  const cockpit = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.52, 0.34, 14), darkMat);
+  cockpit.position.set(0, 0.84, -0.2);
+  cockpit.scale.set(1.08, 1, 1.2);
   group.add(cockpit);
 
-  const screenGeo = new THREE.CylinderGeometry(0.52, 0.55, 0.18, 8, 1, true, -Math.PI / 3, (2 * Math.PI) / 3);
-  screenGeo.rotateX(0.2);
-  const screen = new THREE.Mesh(screenGeo, createTranslucentPaper(0xd8effa, 0.45));
-  screen.position.set(0, 0.88, 0.28);
-  group.add(screen);
+  const windScreen = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.56, 0.6, 0.24, 12, 1, true, -Math.PI / 3, (2 * Math.PI) / 3),
+    createTranslucentPaper(0xdbf2ff, 0.42)
+  );
+  windScreen.position.set(0, 1.08, 0.34);
+  windScreen.rotation.x = 0.24;
+  group.add(windScreen);
 
-  const hoopGeo = new THREE.TorusGeometry(0.38, 0.055, 6, 12, Math.PI);
-  const hoop = finalizePart(new THREE.Mesh(hoopGeo, creamMat), ghost, 28, false);
-  hoop.position.set(0, 0.96, -0.92);
-  hoop.rotation.x = -0.15;
-  group.add(hoop);
+  // 5. 精致低矮单层弧形尾翼（衬托车尾但绝不遮挡大头动物车手）
+  for (const s of [-1, 1]) {
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.44, 0.16), darkMat);
+    strut.position.set(s * 0.44, 1.24, -1.52);
+    strut.rotation.x = -0.22;
+    strut.castShadow = !ghost;
+    group.add(strut);
+  }
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.09, 0.34), accentMat);
+  wing.position.set(0, 1.44, -1.62);
+  wing.rotation.x = -0.14;
+  wing.castShadow = !ghost;
+  group.add(wing);
+
+  // 6. 尾部双出饱满圆筒排气管
+  for (const s of [-1, 1]) {
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.56, 12), darkMat);
+    pipe.rotation.x = Math.PI / 2 - 0.12;
+    pipe.position.set(s * 0.38, 0.58, -1.96);
+    pipe.castShadow = !ghost;
+    group.add(pipe);
+
+    const glow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.11, 10),
+      createEmissivePaper(0xff784f, 0xff4518, 1.25)
+    );
+    glow.position.set(s * 0.38, 0.55, -2.25);
+    glow.rotation.y = Math.PI;
+    group.add(glow);
+  }
 
   return group;
 }
 
-/** 萌趣有机弧面折纸车手（含补全后的 sail 折纸小船帽） */
-function buildOrganicDriver(
-  racer: RacerSpec,
-  ghost: boolean
-): { driverGroup: THREE.Group; steeringRig: THREE.Group } {
+/** 1.35 倍放大 Q 版萌系手办车手（平滑饱满脸庞 + 标志大耳朵/帽子 + 飘逸双叉折纸围巾） */
+function buildChibiDriver(racer: RacerSpec, ghost: boolean): { driverGroup: THREE.Group; steeringRig: THREE.Group } {
   const driverGroup = new THREE.Group();
   const steeringRig = new THREE.Group();
 
-  const paperWhite = ghost
-    ? createTranslucentPaper(0xfefcf6, 0.35)
-    : createPaperMaterial(0xfefcf6, undefined, 0.92);
-  const accent = ghost
-    ? createTranslucentPaper(racer.accentColor, 0.35)
-    : createPaperMaterial(racer.accentColor, undefined, 0.9);
-  const primary = ghost
-    ? createTranslucentPaper(racer.primaryColor, 0.35)
-    : createPaperMaterial(racer.primaryColor, undefined, 0.9);
-  const darkBrown = ghost
-    ? createTranslucentPaper(0x2d221c, 0.4)
-    : createPaperMaterial(0x2d221c, undefined, 0.72);
+  const whiteSmooth = makeSmoothPaperMat(0xfffdf7, ghost, 0.88);
+  const primarySmooth = makeSmoothPaperMat(racer.primaryColor, ghost, 0.86);
+  const accentSmooth = makeSmoothPaperMat(racer.accentColor, ghost, 0.86);
+  const primaryCrisp = makeCrispPaperMat(racer.primaryColor, ghost, 0.9);
+  const accentCrisp = makeCrispPaperMat(racer.accentColor, ghost, 0.9);
+  const whiteCrisp = makeCrispPaperMat(0xfffdf7, ghost, 0.9);
+  const darkBrown = makeSmoothPaperMat(0x2b2019, ghost, 0.45);
+  const blushMat = makeSmoothPaperMat(0xff9eb5, ghost, 0.9);
 
-  // 1. 赛车服小身板 + 奶白围领
-  const bodyGeo = new THREE.CylinderGeometry(0.28, 0.38, 0.48, 10);
-  const bodyMesh = finalizePart(new THREE.Mesh(bodyGeo, primary), ghost, 24, true);
-  bodyMesh.position.set(0, -0.28, 0);
-  driverGroup.add(bodyMesh);
+  // 1. 圆滚滚小身体 + 围巾领圈
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.24, 6, 12), primarySmooth);
+  body.position.set(0, -0.34, 0);
+  body.castShadow = !ghost;
+  driverGroup.add(body);
 
-  const collar = finalizePart(new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.075, 6, 12), accent), ghost, 28, true);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.095, 8, 16), accentSmooth);
   collar.rotation.x = Math.PI / 2;
-  collar.position.set(0, -0.06, 0);
+  collar.position.set(0, -0.1, 0);
+  collar.castShadow = !ghost;
   driverGroup.add(collar);
 
-  // 2. 圆润多面头雕
-  const headGeo = new THREE.DodecahedronGeometry(0.44, 1);
-  headGeo.scale(1.05, 0.94, 0.96);
-  const headMesh = finalizePart(
-    new THREE.Mesh(headGeo, racer.earType === 'box' ? primary : paperWhite),
-    ghost,
-    26,
-    false
-  );
-  driverGroup.add(headMesh);
-
-  // 3. 纽扣高光眼
-  for (const s of [-1, 1]) {
-    const eyeGeo = new THREE.SphereGeometry(0.08, 8, 6);
-    eyeGeo.scale(1, 1.25, 0.4);
-    const eye = new THREE.Mesh(eyeGeo, darkBrown);
-    eye.position.set(s * 0.2, 0.04, 0.41);
-    eye.rotation.y = s * 0.18;
-    driverGroup.add(eye);
-
-    const pupil = new THREE.Mesh(new THREE.CircleGeometry(0.032, 6), paperWhite);
-    pupil.position.set(s * 0.21 + 0.015, 0.07, 0.44);
-    pupil.rotation.y = s * 0.18;
-    driverGroup.add(pupil);
+  // 脖后迎风飘逸的两条折纸围巾尾带（比赛车尾视角超有动感）
+  for (const [idx, s] of [-1, 1].entries()) {
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.68 + idx * 0.14), accentCrisp);
+    tail.position.set(s * 0.16, -0.12 - idx * 0.04, -0.52);
+    tail.rotation.set(-0.18 - idx * 0.08, s * 0.22, s * 0.1);
+    tail.castShadow = !ghost;
+    driverGroup.add(tail);
   }
 
-  // 4. 各角色特征配饰
+  // 2. 1.35 倍放大 Q 版手办大头（圆润平滑苹果肌）
+  const isBox = racer.earType === 'box';
+  const headGeo = isBox
+    ? new THREE.BoxGeometry(0.96, 0.88, 0.9)
+    : new THREE.SphereGeometry(0.56, 18, 14);
+  if (!isBox) headGeo.scale(1.08, 0.94, 0.98);
+  const headColor =
+    racer.earType === 'fox' || racer.earType === 'bear' || isBox ? primarySmooth : whiteSmooth;
+  const head = new THREE.Mesh(headGeo, headColor);
+  head.position.set(0, 0.34, 0);
+  head.castShadow = !ghost;
+  driverGroup.add(head);
+
+  // 3. 萌系大眼 + 双高光点 + 粉嫩腮红（box 除外）
+  if (!isBox) {
+    for (const s of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.095, 10, 8), darkBrown);
+      eye.scale.set(1, 1.2, 0.5);
+      eye.position.set(s * 0.23, 0.38, 0.51);
+      eye.rotation.y = s * 0.18;
+      driverGroup.add(eye);
+
+      const sparkle = new THREE.Mesh(new THREE.CircleGeometry(0.036, 8), whiteSmooth);
+      sparkle.position.set(s * 0.24 + 0.02, 0.42, 0.56);
+      sparkle.rotation.y = s * 0.18;
+      driverGroup.add(sparkle);
+
+      const cheek = new THREE.Mesh(new THREE.CircleGeometry(0.095, 10), blushMat);
+      cheek.position.set(s * 0.35, 0.23, 0.45);
+      cheek.rotation.y = s * 0.48;
+      driverGroup.add(cheek);
+    }
+  }
+
+  // 4. 8 位车手专属大轮廓折纸特征（从车尾一眼可辨！）
   switch (racer.earType) {
     case 'fox': {
-      const snoutGeo = new THREE.ConeGeometry(0.2, 0.38, 6);
-      snoutGeo.rotateX(Math.PI / 2);
-      const snout = finalizePart(new THREE.Mesh(snoutGeo, primary), ghost, 24, true);
-      snout.position.set(0, -0.06, 0.46);
+      // 奶白小脸颊吻部 + 黑鼻尖
+      const snout = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), whiteSmooth);
+      snout.scale.set(1.15, 0.78, 1.1);
+      snout.position.set(0, 0.22, 0.48);
       driverGroup.add(snout);
 
-      const noseTip = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), darkBrown);
-      noseTip.position.set(0, -0.03, 0.65);
-      driverGroup.add(noseTip);
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), darkBrown);
+      nose.position.set(0, 0.27, 0.72);
+      driverGroup.add(nose);
 
+      // 超大双色折纸尖狐耳
       for (const s of [-1, 1]) {
-        const earGeo = new THREE.ConeGeometry(0.22, 0.62, 5);
-        earGeo.scale(0.8, 1, 0.5);
-        const ear = finalizePart(new THREE.Mesh(earGeo, primary), ghost, 22, true);
-        ear.position.set(s * 0.28, 0.46, -0.02);
-        ear.rotation.set(-0.15, s * 0.22, -s * 0.32);
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.76, 4), primaryCrisp);
+        ear.scale.set(0.85, 1, 0.55);
+        ear.position.set(s * 0.36, 0.94, -0.02);
+        ear.rotation.set(-0.14, s * 0.2, -s * 0.34);
+        ear.castShadow = !ghost;
         driverGroup.add(ear);
 
-        const innerGeo = new THREE.ConeGeometry(0.14, 0.45, 4);
-        innerGeo.scale(0.7, 1, 0.3);
-        const inner = new THREE.Mesh(innerGeo, paperWhite);
-        inner.position.set(s * 0.26, 0.44, 0.05);
-        inner.rotation.set(-0.12, s * 0.22, -s * 0.32);
+        const inner = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.52, 4), whiteCrisp);
+        inner.scale.set(0.75, 1, 0.35);
+        inner.position.set(s * 0.34, 0.9, 0.07);
+        inner.rotation.set(-0.12, s * 0.2, -s * 0.34);
         driverGroup.add(inner);
       }
 
+      // 复古飞行员风镜 + 绕脑后皮带
       for (const s of [-1, 1]) {
-        const frame = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.035, 6, 10), darkBrown);
-        frame.position.set(s * 0.18, 0.24, 0.38);
+        const frame = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.04, 8, 14), darkBrown);
+        frame.position.set(s * 0.22, 0.64, 0.46);
         frame.rotation.y = s * 0.2;
         driverGroup.add(frame);
 
         const lens = new THREE.Mesh(
-          new THREE.CircleGeometry(0.11, 8),
-          createEmissivePaper(0x82d2f5, 0x4aa3cc, 0.85)
+          new THREE.CircleGeometry(0.13, 12),
+          createEmissivePaper(0x82d2f5, 0x4aa3cc, 0.75)
         );
-        lens.position.set(s * 0.18, 0.24, 0.39);
+        lens.position.set(s * 0.22, 0.64, 0.47);
         lens.rotation.y = s * 0.2;
         driverGroup.add(lens);
       }
-
-      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.08, 12, 1, true), darkBrown);
-      strap.position.set(0, 0.24, 0);
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.58, 0.1, 16, 1, true), darkBrown);
+      strap.position.set(0, 0.64, 0);
       driverGroup.add(strap);
       break;
     }
     case 'rabbit': {
-      const earLGeo = new THREE.CylinderGeometry(0.12, 0.16, 0.95, 6);
-      earLGeo.scale(0.6, 1, 0.3);
-      const earL = finalizePart(new THREE.Mesh(earLGeo, paperWhite), ghost, 22, false);
-      earL.position.set(-0.22, 0.72, -0.08);
-      earL.rotation.set(-0.25, 0, 0.16);
+      // 超高萌系长兔耳（一只直立微后扬，一只俏皮弯折）
+      const earL = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.85, 6, 10), whiteSmooth);
+      earL.scale.set(0.75, 1, 0.45);
+      earL.position.set(-0.26, 1.18, -0.06);
+      earL.rotation.set(-0.22, 0, 0.16);
+      earL.castShadow = !ghost;
       driverGroup.add(earL);
 
-      const earRGeo1 = new THREE.CylinderGeometry(0.12, 0.16, 0.55, 6);
-      earRGeo1.scale(0.6, 1, 0.3);
-      const earR1 = finalizePart(new THREE.Mesh(earRGeo1, paperWhite), ghost, 22, false);
-      earR1.position.set(0.22, 0.58, -0.05);
-      earR1.rotation.z = -0.22;
-      driverGroup.add(earR1);
+      const earRBase = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.45, 6, 10), whiteSmooth);
+      earRBase.scale.set(0.75, 1, 0.45);
+      earRBase.position.set(0.26, 0.98, -0.04);
+      earRBase.rotation.z = -0.22;
+      earRBase.castShadow = !ghost;
+      driverGroup.add(earRBase);
 
-      const earRGeo2 = new THREE.ConeGeometry(0.14, 0.48, 5);
-      earRGeo2.scale(0.6, 1, 0.3);
-      const earR2 = finalizePart(new THREE.Mesh(earRGeo2, accent), ghost, 22, true);
-      earR2.position.set(0.38, 0.86, 0.06);
-      earR2.rotation.set(0.32, 0, -0.92);
-      driverGroup.add(earR2);
-
-      for (const s of [-1, 1]) {
-        const blush = new THREE.Mesh(new THREE.CircleGeometry(0.08, 8), accent);
-        blush.position.set(s * 0.28, -0.06, 0.36);
-        blush.rotation.y = s * 0.45;
-        driverGroup.add(blush);
-      }
+      const earRTip = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.45, 6, 10), accentSmooth);
+      earRTip.scale.set(0.75, 1, 0.45);
+      earRTip.position.set(0.5, 1.2, 0.08);
+      earRTip.rotation.set(0.25, 0, -1.05);
+      earRTip.castShadow = !ghost;
+      driverGroup.add(earRTip);
       break;
     }
     case 'bear': {
       for (const s of [-1, 1]) {
-        const earGeo = new THREE.TorusGeometry(0.15, 0.08, 6, 8, Math.PI);
-        earGeo.rotateZ(s > 0 ? 0 : Math.PI);
-        const ear = finalizePart(new THREE.Mesh(earGeo, primary), ghost, 24, true);
-        ear.position.set(s * 0.36, 0.36, -0.05);
-        ear.rotation.y = s * 0.25;
+        const ear = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), primarySmooth);
+        ear.scale.set(1, 1, 0.55);
+        ear.position.set(s * 0.46, 0.82, -0.02);
+        ear.castShadow = !ghost;
         driverGroup.add(ear);
-      }
 
-      const snoutGeo = new THREE.SphereGeometry(0.22, 8, 6);
-      snoutGeo.scale(1.1, 0.85, 0.8);
-      const snout = new THREE.Mesh(snoutGeo, accent);
-      snout.position.set(0, -0.08, 0.38);
+        const inner = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), accentSmooth);
+        inner.scale.set(1, 1, 0.4);
+        inner.position.set(s * 0.46, 0.82, 0.07);
+        driverGroup.add(inner);
+      }
+      const snout = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10), accentSmooth);
+      snout.scale.set(1.15, 0.82, 0.85);
+      snout.position.set(0, 0.22, 0.48);
       driverGroup.add(snout);
 
-      const noseTip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), darkBrown);
-      noseTip.position.set(0, -0.02, 0.54);
-      driverGroup.add(noseTip);
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), darkBrown);
+      nose.position.set(0, 0.28, 0.68);
+      driverGroup.add(nose);
 
-      const band = finalizePart(
-        new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.12, 12, 1, true), accent),
-        ghost,
-        26,
-        false
-      );
-      band.position.set(0, 0.18, 0);
+      // 赛车头带 + 脑后飘带结
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.14, 16, 1, true), accentCrisp);
+      band.position.set(0, 0.54, 0);
       driverGroup.add(band);
       break;
     }
     case 'wing': {
-      const beakGeo = new THREE.ConeGeometry(0.18, 0.48, 5);
-      beakGeo.rotateX(Math.PI / 2 + 0.35);
-      beakGeo.rotateZ(Math.PI);
-      const beak = finalizePart(new THREE.Mesh(beakGeo, accent), ghost, 22, true);
-      beak.position.set(0, -0.06, 0.48);
+      const beak = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.46, 5), accentCrisp);
+      beak.rotation.x = Math.PI / 2 + 0.25;
+      beak.position.set(0, 0.24, 0.62);
       driverGroup.add(beak);
 
+      // 三层飞扬折纸羽冠（车尾视角极帅）
       for (let i = 0; i < 3; i++) {
-        const featherGeo = new THREE.ConeGeometry(0.32 - i * 0.05, 0.85, 4);
-        featherGeo.scale(0.5, 1, 0.2);
-        const feather = finalizePart(new THREE.Mesh(featherGeo, primary), ghost, 20, true);
-        feather.position.set(0, 0.38 - i * 0.14, -0.38 - i * 0.18);
-        feather.rotation.x = -1.25 - i * 0.12;
+        const feather = new THREE.Mesh(new THREE.ConeGeometry(0.3 - i * 0.04, 0.95, 4), primaryCrisp);
+        feather.scale.set(0.45, 1, 0.22);
+        feather.position.set(0, 0.78 - i * 0.16, -0.45 - i * 0.16);
+        feather.rotation.x = -1.2 - i * 0.12;
+        feather.castShadow = !ghost;
         driverGroup.add(feather);
       }
       break;
     }
     case 'sail': {
-      // 帆舟·浪：头顶标志性折纸小船水手帽 + 蓝色帽带
-      const hatHullGeo = new THREE.CylinderGeometry(0.46, 0.32, 0.24, 4);
-      hatHullGeo.rotateY(Math.PI / 4);
-      hatHullGeo.scale(0.75, 1, 1.35);
-      const hatHull = finalizePart(new THREE.Mesh(hatHullGeo, paperWhite), ghost, 18, false);
-      hatHull.position.set(0, 0.46, 0.02);
-      driverGroup.add(hatHull);
+      // 招牌折纸小船水手帽
+      const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.4, 0.28, 4), whiteCrisp);
+      hull.rotation.y = Math.PI / 4;
+      hull.scale.set(0.76, 1, 1.38);
+      hull.position.set(0, 0.92, 0.02);
+      hull.castShadow = !ghost;
+      driverGroup.add(hull);
 
-      const sailGeo = new THREE.ConeGeometry(0.28, 0.56, 3);
-      sailGeo.scale(0.35, 1, 1.1);
-      const sail = finalizePart(new THREE.Mesh(sailGeo, primary), ghost, 18, true);
-      sail.position.set(0, 0.72, 0.0);
+      const sail = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.68, 3), primaryCrisp);
+      sail.scale.set(0.35, 1, 1.15);
+      sail.position.set(0, 1.24, 0);
+      sail.castShadow = !ghost;
       driverGroup.add(sail);
 
-      const hatRibbon = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.07, 0.72), accent);
-      hatRibbon.position.set(0, 0.38, 0.02);
-      driverGroup.add(hatRibbon);
+      const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.09, 0.88), accentCrisp);
+      ribbon.position.set(0, 0.82, 0.02);
+      driverGroup.add(ribbon);
       break;
     }
     case 'box': {
-      const eyeVisor = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.45, 0.45, 0.18, 8, 1, true, -Math.PI / 4, Math.PI / 2),
-        createEmissivePaper(0x56e39f, 0x3ac481, 1.4)
+      const visor = new THREE.Mesh(
+        new THREE.BoxGeometry(0.76, 0.28, 0.12),
+        createEmissivePaper(0x56e39f, 0x3ac481, 1.2)
       );
-      eyeVisor.position.set(0, 0.06, 0.05);
-      driverGroup.add(eyeVisor);
+      visor.position.set(0, 0.4, 0.44);
+      driverGroup.add(visor);
 
-      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.65, 6), darkBrown);
-      antenna.position.set(0.24, 0.58, -0.08);
-      antenna.rotation.set(-0.15, 0, -0.28);
+      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.65, 8), darkBrown);
+      antenna.position.set(0.26, 1.05, -0.05);
+      antenna.rotation.z = -0.24;
       driverGroup.add(antenna);
 
-      const tip = new THREE.Mesh(
-        new THREE.SphereGeometry(0.11, 8, 6),
-        createEmissivePaper(0xff4757, 0xff4757, 1.5)
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.14, 10, 8),
+        createEmissivePaper(0xff5b4a, 0xff4757, 1.35)
       );
-      tip.position.set(0.39, 0.9, -0.12);
-      driverGroup.add(tip);
+      bulb.position.set(0.42, 1.38, -0.05);
+      driverGroup.add(bulb);
       break;
     }
   }
 
-  // 5. 方向盘与小爪子
-  const wheelHub = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 12), darkBrown);
-  wheelHub.rotation.x = Math.PI / 3;
-  wheelHub.position.set(0, -0.28, 0.52);
-  steeringRig.add(wheelHub);
-
-  const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.045, 6, 12), accent);
-  wheelRim.rotation.x = Math.PI / 3;
-  wheelRim.position.set(0, -0.28, 0.52);
-  steeringRig.add(wheelRim);
+  // 5. 圆润方向盘 + 搭在方向盘上的 Q 版小手
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.055, 8, 16), darkBrown);
+  rim.rotation.x = Math.PI / 3;
+  rim.position.set(0, -0.2, 0.56);
+  steeringRig.add(rim);
 
   for (const s of [-1, 1]) {
-    const armGeo = new THREE.CylinderGeometry(0.08, 0.11, 0.32, 6);
-    armGeo.rotateZ(s * 0.4);
-    armGeo.rotateX(0.4);
-    const arm = new THREE.Mesh(armGeo, primary);
-    arm.position.set(s * 0.28, -0.24, 0.36);
-    driverGroup.add(arm);
-
-    const pawGeo = new THREE.SphereGeometry(0.09, 6, 5);
-    pawGeo.scale(1, 0.8, 1.2);
-    const paw = new THREE.Mesh(pawGeo, racer.earType === 'box' ? darkBrown : primary);
-    paw.position.set(s * 0.21, -0.24, 0.49);
-    paw.rotation.y = s * 0.3;
+    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), isBox ? darkBrown : primarySmooth);
+    paw.position.set(s * 0.24, -0.18, 0.52);
     steeringRig.add(paw);
   }
 
   return { driverGroup, steeringRig };
 }
 
-/** 组装高阶手工拼贴折纸赛车 */
+/** 组装 Q 版圆润胖卡丁车 + 大头萌系折纸车手 */
 export function buildCar(racer: RacerSpec, _paper: PaperSpec, ghost = false): CarVisual {
   const root = new THREE.Group();
   const tiltGroup = new THREE.Group();
   root.add(tiltGroup);
 
-  const primary = ghost ? createTranslucentPaper(racer.primaryColor, 0.35) : createPaperMaterial(racer.primaryColor);
-  const accent = ghost ? createTranslucentPaper(racer.accentColor, 0.35) : createPaperMaterial(racer.accentColor);
-  const dark = ghost ? createTranslucentPaper(0x28201a, 0.35) : createPaperMaterial(0x28201a, undefined, 0.95);
-  const kraft = ghost ? createTranslucentPaper(0xc8a97e, 0.35) : createPaperMaterial(0xc8a97e, undefined, 0.96);
-  const cream = ghost ? createTranslucentPaper(0xfaf3e3, 0.35) : createPaperMaterial(0xfaf3e3, undefined, 0.92);
+  const primary = makeSmoothPaperMat(racer.primaryColor, ghost, 0.86);
+  const accent = makeSmoothPaperMat(racer.accentColor, ghost, 0.86);
+  const dark = makeSmoothPaperMat(0x2d241e, ghost, 0.9);
+  const kraft = makeSmoothPaperMat(0xc8a97e, ghost, 0.94);
+  const cream = makeSmoothPaperMat(0xfcf6e8, ghost, 0.9);
 
-  // 1. 流线型底盘（含牛皮纸底板、贴纸编号与复古圆灯）
-  const chassis = buildStreamlinedChassis(racer, primary, accent, dark, kraft, cream, ghost);
-  chassis.position.y = 0.34;
-  tiltGroup.add(chassis);
+  // 1. 一体式圆润胖卡丁车壳
+  const body = buildCozyKartBody(racer, primary, accent, dark, kraft, cream, ghost);
+  body.position.y = 0.24;
+  tiltGroup.add(body);
 
   // 2. 柔边径向渐变贴地接触阴影
-  const tray = new THREE.Mesh(
-    new THREE.PlaneGeometry(4.4, 6.2),
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.9, 5.2),
     new THREE.MeshBasicMaterial({
       map: getSoftShadowTexture(),
       transparent: true,
@@ -582,167 +591,51 @@ export function buildCar(racer: RacerSpec, _paper: PaperSpec, ghost = false): Ca
       polygonOffsetFactor: -1,
     })
   );
-  tray.rotation.x = -Math.PI / 2;
-  tray.position.y = 0.03;
-  root.add(tray);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.03;
+  root.add(shadow);
 
-  // 3. 前下扰流铲
-  const splitterGeo = new THREE.CylinderGeometry(1.08, 1.15, 0.06, 10, 1, false, -Math.PI / 2, Math.PI);
-  splitterGeo.rotateX(Math.PI / 2);
-  const splitter = finalizePart(new THREE.Mesh(splitterGeo, kraft), ghost, 24, true);
-  splitter.position.set(0, 0.36, 2.22);
-  splitter.scale.set(1.0, 0.55, 1.0);
-  tiltGroup.add(splitter);
-
-  // 4. 双层弧面竞技大尾翼
-  for (const s of [-1, 1]) {
-    const postGeo = new THREE.CylinderGeometry(0.06, 0.09, 0.72, 6);
-    postGeo.rotateX(0.24);
-    const post = finalizePart(new THREE.Mesh(postGeo, dark), ghost, 24, true);
-    post.position.set(s * 0.48, 1.18, -1.95);
-    tiltGroup.add(post);
-  }
-
-  const wingGeo = new THREE.CylinderGeometry(0.88, 0.88, 0.08, 10);
-  wingGeo.scale(1.0, 0.5, 0.35);
-  wingGeo.rotateZ(Math.PI / 2);
-  wingGeo.rotateX(-0.16);
-  const mainWing = finalizePart(new THREE.Mesh(wingGeo, accent), ghost, 22, true);
-  mainWing.position.set(0, 1.44, -2.08);
-  tiltGroup.add(mainWing);
-
-  for (const s of [-1, 1]) {
-    const endplateGeo = new THREE.ConeGeometry(0.38, 0.76, 4);
-    endplateGeo.scale(0.12, 1, 0.6);
-    endplateGeo.rotateZ(Math.PI / 2);
-    endplateGeo.rotateY(s * 0.1);
-    const endplate = finalizePart(new THREE.Mesh(endplateGeo, primary), ghost, 20, true);
-    endplate.position.set(s * 0.92, 1.46, -2.12);
-    tiltGroup.add(endplate);
-  }
-
-  // 车尾左侧手工竹签小纸旗（增加后视角玩具辨识度）
-  if (!ghost) {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.15, 6), kraft);
-    pole.position.set(-0.78, 1.52, -1.85);
-    pole.rotation.z = 0.14;
-    pole.rotation.x = -0.18;
-    tiltGroup.add(pole);
-
-    const flagGeo = new THREE.BufferGeometry();
-    flagGeo.setAttribute(
-      'position',
-      new THREE.Float32BufferAttribute(
-        [
-          0, 0.24, 0,
-          0, -0.16, 0,
-          0, 0.04, -0.68,
-        ],
-        3
-      )
-    );
-    flagGeo.computeVertexNormals();
-    const flagMat = createPaperMaterial(racer.accentColor, undefined, 0.88);
-    flagMat.side = THREE.DoubleSide;
-    const flag = finalizePart(new THREE.Mesh(flagGeo, flagMat), false, 15, true);
-    flag.position.set(-0.86, 1.92, -1.94);
-    tiltGroup.add(flag);
-  }
-
-  // 5. 尾部双出排气管
-  for (const s of [-1, 1]) {
-    const pipeGeo = new THREE.CylinderGeometry(0.14, 0.16, 0.48, 8);
-    pipeGeo.rotateX(Math.PI / 2);
-    const pipe = finalizePart(new THREE.Mesh(pipeGeo, dark), ghost, 24, true);
-    pipe.position.set(s * 0.32, 0.56, -2.28);
-    tiltGroup.add(pipe);
-
-    const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.1, 8),
-      createEmissivePaper(0xff6b4a, 0xff3814, 1.3)
-    );
-    glow.position.set(s * 0.32, 0.56, -2.53);
-    tiltGroup.add(glow);
-  }
-
-  // 6. 四只叠层纸轮
+  // 3. 四只紧贴车身的宽厚大轮胎
   const wheels: THREE.Object3D[] = [];
   const frontWheels: THREE.Object3D[] = [];
   const wheelPos: [number, number, number, boolean][] = [
-    [-1.12, 0.56, 1.34, true],
-    [1.12, 0.56, 1.34, true],
-    [-1.12, 0.56, -1.34, false],
-    [1.12, 0.56, -1.34, false],
+    [-1.02, 0.54, 1.18, true],
+    [1.02, 0.54, 1.18, true],
+    [-1.06, 0.56, -1.16, false],
+    [1.06, 0.56, -1.16, false],
   ];
 
   for (const [x, y, z, isFront] of wheelPos) {
-    const { spin } = makeWheel(racer.accentColor, ghost);
+    const { spin } = makeChunkyWheel(racer.accentColor, ghost);
     if (isFront) {
       const steer = new THREE.Group();
       steer.position.set(x, y, z);
-      spin.position.set(0, 0, 0);
       steer.add(spin);
       tiltGroup.add(steer);
       frontWheels.push(steer);
     } else {
       spin.position.set(x, y, z);
+      spin.scale.setScalar(1.06); // 后轮略大于前轮，卡丁车视觉更稳更有冲劲
       tiltGroup.add(spin);
     }
     wheels.push(spin);
   }
 
-  // 7. 动物车手 + 方向盘联动
-  const { driverGroup, steeringRig } = buildOrganicDriver(racer, ghost);
-  driverGroup.position.set(0, 1.54, -0.28);
+  // 4. 1.35 倍 Q 版大头萌系动物车手
+  const { driverGroup, steeringRig } = buildChibiDriver(racer, ghost);
+  driverGroup.position.set(0, 1.56, -0.22);
   tiltGroup.add(driverGroup);
-
-  steeringRig.position.set(0, 1.25, -0.28);
+  steeringRig.position.set(0, 1.24, -0.22);
   tiltGroup.add(steeringRig);
 
-  // 8. 迎风飘逸折纸小披风 + 行囊
-  const capeGeo = new THREE.BufferGeometry();
-  capeGeo.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute(
-      [
-        -0.34, 1.74, -0.62,
-        0, 1.78, -0.68,
-        0, 1.38, -1.24,
-        -0.34, 1.74, -0.62,
-        0, 1.38, -1.24,
-        -0.44, 1.48, -1.14,
-        0, 1.78, -0.68,
-        0.34, 1.74, -0.62,
-        0.44, 1.48, -1.14,
-        0, 1.78, -0.68,
-        0.44, 1.48, -1.14,
-        0, 1.38, -1.24,
-      ],
-      3
-    )
-  );
-  capeGeo.computeVertexNormals();
-  const capeMat = ghost
-    ? createTranslucentPaper(racer.accentColor, 0.35)
-    : createPaperMaterial(racer.accentColor, undefined, 0.88);
-  capeMat.side = THREE.DoubleSide;
-  const cape = finalizePart(new THREE.Mesh(capeGeo, capeMat), ghost, 16, true);
-  tiltGroup.add(cape);
-
-  const packGeo = new THREE.CylinderGeometry(0.32, 0.34, 0.44, 8);
-  packGeo.scale(1, 0.8, 0.6);
-  const pack = finalizePart(new THREE.Mesh(packGeo, cream), ghost, 24, false);
-  pack.position.set(0, 1.52, -1.34);
-  tiltGroup.add(pack);
-
-  // 9. 护盾视觉
+  // 5. 透明胶带护盾球
   const shieldMesh = new THREE.Group();
   const shieldSolid = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(2.55, 1),
+    new THREE.IcosahedronGeometry(2.45, 1),
     createTranslucentPaper(0xbfe3f2, 0.18, 0x9fd4ea, 0.35)
   );
   shieldMesh.add(shieldSolid);
-  shieldMesh.position.y = 1.0;
+  shieldMesh.position.y = 1.05;
   shieldMesh.visible = false;
   root.add(shieldMesh);
 
