@@ -49,5 +49,13 @@ await page.evaluate(() => {
 await wait(1500);
 await page.screenshot({ path: 'shots/v6-car-close-bear.png' });
 
+// 切换到帆舟·浪 (boat)
+await page.evaluate(() => {
+  window.__store.getState().setConfig({ racerId: 'boat' });
+  window.__engine.enterLobby(window.__store.getState().config, 3);
+});
+await wait(1500);
+await page.screenshot({ path: 'shots/v7-car-close-boat.png' });
+
 await browser.close();
 console.log('Close up car screenshots captured successfully!');
