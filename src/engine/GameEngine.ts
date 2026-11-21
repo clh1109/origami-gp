@@ -9,6 +9,7 @@ import { updatePopupProps, popAllInstant } from '../models/PopupPropBuilder';
 import { buildCar } from '../models/CarBuilder';
 import { BookIntroCinematic } from '../models/BookIntroCinematic';
 import { CraneRescueController } from '../models/CraneRescue';
+import { FinishCelebrationController } from '../models/FinishCelebration';
 import { stepCarPhysics, resolveCarCollisions, computeOffroad } from '../gameplay/PhysicsSystem';
 import { computeAIInput } from '../gameplay/AIController';
 import { GhostRecorder, GhostPlayer, loadBestGhost, saveBestGhost } from '../gameplay/GhostRecorder';
@@ -70,6 +71,7 @@ export class GameEngine {
   private showcaseCar: CarRuntimeState | null = null;
   private bookIntro: BookIntroCinematic | null = null;
   private craneRescue: CraneRescueController;
+  private finishCelebration: FinishCelebrationController;
   hasPlayedIntro = false;
 
   private time = 0;
@@ -95,6 +97,7 @@ export class GameEngine {
     this.audio = new AudioEngine();
     this.particles = new ParticleSystem(this.sm.scene);
     this.craneRescue = new CraneRescueController(this.sm.scene);
+    this.finishCelebration = new FinishCelebrationController(this.sm.scene);
     this.bindInput();
     window.addEventListener('resize', this.onResize);
   }
@@ -252,6 +255,7 @@ export class GameEngine {
   // ================= 大厅 =================
   enterLobby(config: RaceConfig, step: LobbyStep): void {
     this.craneRescue.reset();
+    this.finishCelebration.reset();
     this.config = config;
     this.mode = config.mode;
     this.phase = 'lobby';
@@ -345,6 +349,7 @@ export class GameEngine {
   startRace(config: RaceConfig): void {
     this.bookIntro?.finish();
     this.craneRescue.reset();
+    this.finishCelebration.reset();
     this.config = config;
     this.mode = config.mode;
     this.clearCars();
@@ -794,7 +799,11 @@ export class GameEngine {
       this.groundFollow(car, q, dt);
     }
     const maxSpeed = 40;
-    this.rig.updateRace(dt, this.player.pos, this.player.heading, this.player.speed, maxSpeed, false);
+    if (this.finishCelebration.isActive) {
+      this.finishCelebration.update(dt, this.player.pos, this.sm.camera);
+    } else {
+      this.rig.updateRace(dt, this.player.pos, this.player.heading, this.player.speed, maxSpeed, false);
+    }
     this.sm.updateShadowFocus(this.player.pos);
     this.audio.updateEngine(Math.abs(this.player.speed) / maxSpeed, false, false);
     this.audio.stopDrift();
@@ -819,8 +828,14 @@ export class GameEngine {
         bestLap: c.bestLap, finished: c.finished, color: c.racer.primaryColor,
       }));
     this.events.onPhase?.('finished');
-    this.events.onResults?.(results);
     this.pushHud(true);
+    if (this.player) {
+      this.finishCelebration.trigger(this.player.pos, this.player.heading, () => {
+        this.events.onResults?.(results);
+      });
+    } else {
+      this.events.onResults?.(results);
+    }
   }
 
   // ================= HUD / 小地图 =================
@@ -873,6 +888,7 @@ export class GameEngine {
     this.disposed = true;
     this.bookIntro?.dispose();
     this.craneRescue.dispose();
+    this.finishCelebration.dispose();
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.onKeyDown);
