@@ -58,9 +58,9 @@ function cached(key: string, make: () => THREE.Texture): THREE.Texture {
   return t;
 }
 
-/** 纸张纤维凹凸图（灰度，线性空间） */
+/** 纸张纤维凹凸图（灰度，线性空间）：双频纤维 + 细微纸浆颗粒 */
 export function getPaperFiberBump(): THREE.Texture {
-  return cached('fiber', () => {
+  return cached('fiber_v2', () => {
     const size = 256;
     const { canvas, ctx } = createCanvas(size);
     const rnd = mulberry(1337);
@@ -68,13 +68,16 @@ export function getPaperFiberBump(): THREE.Texture {
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const i = (y * size + x) * 4;
-        // 基础纤维噪声 + 轻微横向拉丝
-        const n = rnd();
-        const streak = Math.sin(x * 0.35 + y * 0.06) * 0.5 + 0.5;
-        let v = 128 + (n - 0.5) * 46 + (streak - 0.5) * 16;
-        // 偶发粗纤维
-        if (rnd() > 0.994) v += 40;
-        if (rnd() > 0.994) v -= 40;
+        // 基础高频纤维微粒
+        const n1 = rnd();
+        // 中频纸浆横向与纵向编织条纹
+        const streakX = Math.sin(x * 0.42 + y * 0.08) * 0.5 + 0.5;
+        const streakY = Math.cos(y * 0.38 - x * 0.05) * 0.5 + 0.5;
+        let v = 128 + (n1 - 0.5) * 36 + (streakX - 0.5) * 14 + (streakY - 0.5) * 10;
+        // 偶发粗纤维丝与微小纸孔
+        const clump = rnd();
+        if (clump > 0.992) v += 38;
+        else if (clump < 0.008) v -= 38;
         v = Math.max(0, Math.min(255, v));
         img.data[i] = v;
         img.data[i + 1] = v;
@@ -83,7 +86,28 @@ export function getPaperFiberBump(): THREE.Texture {
       }
     }
     ctx.putImageData(img, 0, 0);
-    return toTexture(canvas, false, 1);
+    return toTexture(canvas, false, 2);
+  });
+}
+
+/** 纸张微粗糙度微变贴图：让折纸迎光面产生非塑料感的哑光散射微变化 */
+export function getPaperRoughnessMap(): THREE.Texture {
+  return cached('roughness_v2', () => {
+    const size = 128;
+    const { canvas, ctx } = createCanvas(size);
+    const rnd = mulberry(2024);
+    const img = (ctx as CanvasRenderingContext2D).createImageData(size, size);
+    for (let i = 0; i < size * size; i++) {
+      const idx = i * 4;
+      // 维持在 210~250 之间（高粗糙度，微小浮动）
+      const r = 225 + Math.floor((rnd() - 0.5) * 35);
+      img.data[idx] = r;
+      img.data[idx + 1] = r;
+      img.data[idx + 2] = r;
+      img.data[idx + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return toTexture(canvas, false, 2);
   });
 }
 

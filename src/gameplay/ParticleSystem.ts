@@ -11,6 +11,7 @@ interface Particle {
   size: number;
   color: THREE.Color;
   gravity: number;
+  floor: number;
 }
 
 const MAX = 400;
@@ -47,6 +48,7 @@ export class ParticleSystem {
         size: 1,
         color: new THREE.Color(0xffffff),
         gravity: 9,
+        floor: 0.05,
       });
       this.dummy.position.set(0, -100, 0);
       this.dummy.scale.setScalar(0.0001);
@@ -79,6 +81,8 @@ export class ParticleSystem {
     p.size = size;
     p.color.set(color);
     p.gravity = gravity;
+    // 纸屑落在出生处的路面 / 草地上，而不是穿透高架坡道
+    p.floor = Math.max(0.05, pos.y - 0.25);
   }
 
   /** 漂移彩纸屑：tier 0 纸白 / 1 蓝 / 2 金 */
@@ -137,8 +141,8 @@ export class ParticleSystem {
       p.vel.y -= p.gravity * dt;
       p.vel.multiplyScalar(Math.pow(0.4, dt));
       p.pos.addScaledVector(p.vel, dt);
-      if (p.pos.y < 0.05) {
-        p.pos.y = 0.05;
+      if (p.pos.y < p.floor) {
+        p.pos.y = p.floor;
         p.vel.y *= -0.3;
       }
       p.rot.x += p.rotVel.x * dt;

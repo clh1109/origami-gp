@@ -25,6 +25,7 @@ export class SceneManager {
   tiltV: ShaderPass;
 
   dirLight: THREE.DirectionalLight;
+  rimLight: THREE.DirectionalLight;
   hemiLight: THREE.HemisphereLight;
   ambient: THREE.AmbientLight;
 
@@ -43,38 +44,43 @@ export class SceneManager {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.02;
+    this.renderer.toneMappingExposure = 1.15;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xdbeee4);
-    this.scene.fog = new THREE.Fog(0xdbeee4, 90, 320);
+    this.scene.background = new THREE.Color(0xebe6d6);
+    this.scene.fog = new THREE.Fog(0xebe6d6, 120, 480);
 
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 900);
     this.camera.position.set(0, 30, 60);
 
-    // 主方向光（暖色）
-    this.dirLight = new THREE.DirectionalLight(0xfff3dc, 0.85);
+    // 主方向光（45° 午后暖阳金光，提亮纸面）
+    this.dirLight = new THREE.DirectionalLight(0xfff3d6, 1.65);
     this.dirLight.position.copy(this.shadowOffset);
     this.dirLight.castShadow = true;
     this.dirLight.shadow.mapSize.set(2048, 2048);
-    this.dirLight.shadow.bias = -0.0005;
-    this.dirLight.shadow.normalBias = 0.02;
+    this.dirLight.shadow.bias = -0.0003;
+    this.dirLight.shadow.normalBias = 0.024;
     const sc = this.dirLight.shadow.camera;
     sc.near = 1;
-    sc.far = 220;
-    sc.left = -52;
-    sc.right = 52;
-    sc.top = 52;
-    sc.bottom = -52;
+    sc.far = 240;
+    sc.left = -55;
+    sc.right = 55;
+    sc.top = 55;
+    sc.bottom = -55;
     sc.updateProjectionMatrix();
     this.scene.add(this.dirLight);
     this.scene.add(this.dirLight.target);
 
-    // 半球光（天空 / 地面反弹）
-    this.hemiLight = new THREE.HemisphereLight(0xfffaf0, 0xa89984, 0.62);
+    // 辅助轮廓光（反向微弱暖白光，照亮折纸边缘与轮廓线稿）
+    this.rimLight = new THREE.DirectionalLight(0xffeed6, 0.45);
+    this.rimLight.position.set(-28, 36, -30);
+    this.scene.add(this.rimLight);
+
+    // 半球光（天空暖白 / 暖米书纸反弹光，消除树底与轮胎死黑）
+    this.hemiLight = new THREE.HemisphereLight(0xfffaec, 0xeddcc4, 1.25);
     this.scene.add(this.hemiLight);
 
     this.ambient = new THREE.AmbientLight(0xffffff, 0.0);
@@ -87,9 +93,9 @@ export class SceneManager {
     this.composer.addPass(this.renderPass);
 
     this.n8aoPass = new N8AOPass(this.scene, this.camera, window.innerWidth, window.innerHeight);
-    this.n8aoPass.configuration.aoRadius = 1.6;
-    this.n8aoPass.configuration.intensity = 2.5;
-    this.n8aoPass.configuration.distanceFalloff = 1.0;
+    this.n8aoPass.configuration.aoRadius = 0.95;
+    this.n8aoPass.configuration.intensity = 1.25;
+    this.n8aoPass.configuration.distanceFalloff = 1.15;
     this.n8aoPass.configuration.denoiseSamples = 8;
     this.n8aoPass.configuration.denoiseRadius = 10;
     this.n8aoPass.configuration.halfRes = true;
@@ -123,17 +129,21 @@ export class SceneManager {
     if (night) {
       this.dirLight.color.setHex(0xbfd0ff);
       this.dirLight.intensity = 0.42;
+      this.rimLight.color.setHex(0x5a709a);
+      this.rimLight.intensity = 0.25;
       this.hemiLight.color.setHex(0x3a4a72);
       this.hemiLight.groundColor.setHex(0x141a2a);
       this.hemiLight.intensity = 0.5;
       this.ambient.color.setHex(0x2a3550);
       this.ambient.intensity = 0.55;
     } else {
-      this.dirLight.color.setHex(0xfff3dc);
-      this.dirLight.intensity = 0.85;
-      this.hemiLight.color.setHex(0xfffaf0);
-      this.hemiLight.groundColor.setHex(0xa89984);
-      this.hemiLight.intensity = 0.62;
+      this.dirLight.color.setHex(0xfff3d6);
+      this.dirLight.intensity = 1.65;
+      this.rimLight.color.setHex(0xffeed6);
+      this.rimLight.intensity = 0.45;
+      this.hemiLight.color.setHex(0xfffaec);
+      this.hemiLight.groundColor.setHex(0xeddcc4);
+      this.hemiLight.intensity = 1.25;
       this.ambient.intensity = 0.0;
     }
   }

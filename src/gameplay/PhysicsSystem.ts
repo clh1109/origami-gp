@@ -131,7 +131,7 @@ export function resolveCarCollisions(cars: CarRuntimeState[]): CollisionEvent[] 
         events.push({
           a,
           b,
-          point: new THREE.Vector3((a.pos.x + b.pos.x) / 2, 1, (a.pos.z + b.pos.z) / 2),
+          point: new THREE.Vector3((a.pos.x + b.pos.x) / 2, (a.pos.y + b.pos.y) / 2 + 1, (a.pos.z + b.pos.z) / 2),
           strength,
         });
       }

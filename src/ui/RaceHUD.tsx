@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Shield, Send, StickyNote, Undo2, Flag, Timer, AlertTriangle, Gauge } from 'lucide-react';
 import { useGameStore, formatTime } from '../store/gameStore';
+import { getTrack } from '../data/tracks';
 import type { ItemType, MinimapData } from '../types/game';
 
 const ITEM_ICON: Record<ItemType, typeof Shield> = {
@@ -10,7 +11,7 @@ const ITEM_ICON: Record<ItemType, typeof Shield> = {
   boomerang: Undo2,
 };
 const ITEM_NAME: Record<ItemType, string> = {
-  shield: '胶带护盾',
+  shield: '透明胶带护盾',
   boost: '纸飞机冲刺',
   trap: '双面胶陷阱',
   boomerang: '折纸回旋镖',
@@ -97,80 +98,101 @@ function Minimap({ getMinimap }: { getMinimap: () => MinimapData | null }) {
 export default function RaceHUD({ getMinimap }: { getMinimap: () => MinimapData | null }) {
   const hud = useGameStore((s) => s.hud);
   const phase = useGameStore((s) => s.phase);
+  const config = useGameStore((s) => s.config);
+  const currentTrack = getTrack(config.trackId);
   const ItemIcon = hud.heldItem ? ITEM_ICON[hud.heldItem] : null;
-  const driftPct = Math.min(1, hud.driftCharge / 1.6) * 100;
-  const driftColor = hud.driftTier === 2 ? '#ffd166' : hud.driftTier === 1 ? '#4b8ab0' : '#faf3e3';
+
+  const trackIndex = config.trackId === 'meadow' ? 1 : config.trackId === 'twilight' ? 2 : config.trackId === 'frost' ? 3 : 4;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 select-none">
-      {/* 左上：圈数 / 名次 */}
-      <div className="absolute left-3 top-3 flex gap-2">
-        <div className="paper-card origami-border rounded-xl px-3 py-2 shadow-card">
-          <div className="flex items-center gap-1 text-[10px] text-ink/60"><Flag size={11} /> 圈数</div>
-          <div className="tabular font-hand text-xl font-bold leading-none text-ink">
-            {hud.lap}<span className="text-sm text-ink/50">/{hud.totalLaps}</span>
-          </div>
-        </div>
-        <div className="paper-card origami-border rounded-xl px-3 py-2 shadow-card">
-          <div className="text-[10px] text-ink/60">名次</div>
-          <div className="tabular font-hand text-xl font-bold leading-none text-coral">
-            {hud.place}<span className="text-sm text-ink/50">/{hud.totalRacers}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 右上：计时 */}
-      <div className="paper-card origami-border absolute right-3 top-3 rounded-xl px-3 py-2 text-right shadow-card">
-        <div className="flex items-center justify-end gap-1 text-[10px] text-ink/60"><Timer size={11} /> 总时间</div>
-        <div className="tabular font-hand text-lg font-bold leading-tight text-ink">{formatTime(hud.raceTime)}</div>
-        <div className="tabular text-[10px] text-ink/60">最佳 {formatTime(hud.bestLap)}</div>
-        <div className="tabular text-[10px] text-ink/60">上圈 {formatTime(hud.lastLap)}</div>
-      </div>
-
-      {/* 左下：小地图 */}
-      <div className="paper-card origami-border absolute bottom-3 left-3 rounded-xl p-2 shadow-card">
-        <Minimap getMinimap={getMinimap} />
-      </div>
-
-      {/* 右下：速度 / 漂移 / 道具 */}
-      <div className="absolute bottom-3 right-3 flex items-end gap-2">
-        {/* 道具槽 */}
-        <div className="paper-card origami-border relative flex h-[86px] w-[86px] flex-col items-center justify-center overflow-hidden rounded-xl shadow-card">
+      {/* 左上角：纸质便签道具槽 (1:1 像素级复刻原视频：左上独立白卡便签 + 黄色五角星/道具 + 白贴纸标签) */}
+      <div className="absolute left-4 top-4 flex flex-col items-center">
+        <div className="paper-card origami-border relative flex h-[88px] w-[88px] flex-col items-center justify-center overflow-hidden rounded-2xl shadow-card bg-white/95">
           {hud.roulette ? (
             <div className="roulette-strip flex flex-col items-center" style={{ animation: 'roulette-spin 0.35s linear infinite' }}>
               {[...Object.keys(ITEM_ICON), ...Object.keys(ITEM_ICON)].map((k, i) => {
                 const Icon = ITEM_ICON[k as ItemType];
-                return <Icon key={i} size={30} style={{ color: ITEM_COLOR[k as ItemType] }} className="my-2" />;
+                return <Icon key={i} size={36} style={{ color: ITEM_COLOR[k as ItemType] }} className="my-2" />;
               })}
             </div>
           ) : ItemIcon ? (
-            <>
-              <ItemIcon size={34} style={{ color: ITEM_COLOR[hud.heldItem!] }} />
-              <span className="mt-1 text-[9px] font-bold text-ink/70">{ITEM_NAME[hud.heldItem!]}</span>
-            </>
+            <div className="flex flex-col items-center justify-center p-2">
+              <ItemIcon size={42} style={{ color: ITEM_COLOR[hud.heldItem!] }} className="drop-shadow-sm transition-transform animate-pop-in" />
+            </div>
           ) : (
-            <span className="font-hand text-3xl font-bold text-ink/25">?</span>
+            <div className="flex flex-col items-center justify-center text-ink/20">
+              <span className="font-hand text-3xl font-bold">?</span>
+            </div>
           )}
-          <span className="absolute bottom-0.5 text-[8px] text-ink/40">道具 E</span>
+          <span className="absolute bottom-1 text-[8px] font-bold text-ink/40">E / Enter</span>
         </div>
-        {/* 速度 + 漂移 */}
-        <div className="paper-card origami-border rounded-xl px-3 py-2 shadow-card">
-          <div className="flex items-end gap-1">
-            <Gauge size={16} className="mb-1 text-ink/60" />
-            <span className="tabular font-hand text-3xl font-bold leading-none text-ink">{hud.speed}</span>
-            <span className="mb-0.5 text-[10px] text-ink/60">km/h</span>
+        {/* 道具名称白纸标签 (对齐视频白底黑字小标签，如 玻璃纸护盾 / 透明胶带护盾) */}
+        {hud.heldItem && (
+          <div className="origami-border -mt-2 rounded-md bg-white/95 px-2.5 py-0.5 shadow-sm">
+            <span className="font-hand text-[11px] font-bold text-ink">{ITEM_NAME[hud.heldItem]}</span>
           </div>
-          <div className="mt-1 h-2 w-28 overflow-hidden rounded-full bg-ink/10">
-            <div className="h-full rounded-full transition-[width] duration-75" style={{ width: `${driftPct}%`, background: driftColor }} />
-          </div>
-          <div className="mt-1 flex gap-1">
-            {hud.boost && <Send size={13} className="text-coral" />}
-            {hud.shield && <Shield size={13} className="text-[#4b8ab0]" />}
-            {hud.slow && <StickyNote size={13} className="text-[#d9a520]" />}
-            {hud.offroad && <AlertTriangle size={13} className="text-[#c86d51]" />}
-          </div>
+        )}
+      </div>
+
+      {/* 右上角：圈数与计时便签条 (1:1 像素级复刻原视频：右上极简白纸横条 [圈数 1/3] [时间 00:27.16]) */}
+      <div className="paper-card origami-border absolute right-4 top-4 flex items-center gap-3.5 rounded-xl px-4 py-2.5 shadow-card bg-white/95">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-bold text-ink/60">圈数</span>
+          <span className="tabular font-hand text-2xl font-bold leading-none text-ink">
+            {hud.lap}<span className="text-sm font-normal text-ink/50">/{hud.totalLaps}</span>
+          </span>
+        </div>
+        <div className="h-6 w-px bg-ink/20" />
+        <div className="tabular font-hand text-xl font-bold leading-none text-ink">
+          {formatTime(hud.raceTime)}
         </div>
       </div>
+
+      {/* 左下角：手账方格小地图 (比赛进行时显示，1:1 对标原视频) */}
+      {phase !== 'countdown' && (
+        <div className="paper-card origami-border absolute bottom-4 left-4 rounded-xl p-2 shadow-card max-md:bottom-auto max-md:top-28 bg-white/95 animate-fade-up">
+          <Minimap getMinimap={getMinimap} />
+        </div>
+      )}
+
+      {/* 右下角：纯净打孔名次白卡 (比赛进行时显示，1:1 像素级复刻原视频 '8.') */}
+      {phase !== 'countdown' && (
+        <div className="absolute bottom-4 right-4 flex items-end animate-fade-up">
+          <div className="paper-card origami-border relative flex h-[90px] w-[86px] flex-col items-center justify-center rounded-2xl p-2 shadow-card bg-white/95">
+            <div className="tabular font-hand text-6xl font-black leading-none text-ink tracking-tighter">
+              {hud.place}<span className="text-4xl text-ink font-bold">.</span>
+            </div>
+            <span className="tabular text-[10px] font-bold text-ink/40 tracking-wider mt-1">/{hud.totalRacers}</span>
+            {/* 打孔小孔效果 */}
+            <div className="absolute top-2 left-2 h-2.5 w-2.5 rounded-full border border-ink/20 bg-paper/60" />
+          </div>
+        </div>
+      )}
+
+      {/* 赛道巡航开场便签 (1:1 像素级复刻原视频 0:02 章节手撕便签牌，仅在起跑倒计时显示) */}
+      {phase === 'countdown' && (
+        <>
+          <div className="pointer-events-none absolute bottom-6 left-6 z-30 animate-fade-up max-md:top-20 max-md:left-3 max-md:bottom-auto">
+            <div className="paper-card origami-border rounded-2xl p-3.5 shadow-pop bg-white/95 max-w-[260px]">
+              <div className="text-[11px] font-bold tracking-widest text-coral uppercase">
+                章节 {trackIndex}
+              </div>
+              <div className="font-hand text-2xl md:text-3xl font-extrabold text-ink mt-0.5">
+                {currentTrack.name}
+              </div>
+              <div className="text-[11px] text-ink/65 mt-0.5 leading-relaxed">
+                {currentTrack.subtitle}
+              </div>
+            </div>
+          </div>
+          <div className="pointer-events-none absolute bottom-6 right-6 z-30 hidden md:block animate-fade-up">
+            <div className="paper-card origami-border rounded-xl px-4 py-2 shadow-sm text-xs font-bold text-ink/70 bg-white/95">
+              Enter 跳过
+            </div>
+          </div>
+        </>
+      )}
 
       {/* 中央倒计时 */}
       {phase === 'countdown' && (

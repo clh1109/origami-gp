@@ -82,7 +82,7 @@ export default function Modals({ onRestart, onLobby }: { onRestart: () => void; 
             </section>
             <section>
               <h3 className="mb-1 font-bold text-ink">触屏</h3>
-              <p className="text-[13px]">在设置中开启虚拟按键：左侧转向，右侧油门/刹车/漂移/道具。</p>
+              <p className="text-[13px]">虚拟按键默认开启：左侧转向，右侧油门/刹车/漂移/道具，鼠标点按同样可用；不需要时可在「设置」关闭。</p>
             </section>
           </div>
         </Modal>
@@ -93,7 +93,7 @@ export default function Modals({ onRestart, onLobby }: { onRestart: () => void; 
           <div className="space-y-2">
             <Toggle label="软阴影" desc="2048 PCF 软阴影，纸艺接触感" value={settings.shadows} onChange={(b) => set({ shadows: b })} />
             <Toggle label="高画质后处理" desc="N8AO 环境光遮蔽（低配设备可关闭）" value={settings.highQuality} onChange={(b) => set({ highQuality: b })} />
-            <Toggle label="触屏虚拟按键" desc="显示移动端方向与油门/漂移/道具按钮" value={settings.touch} onChange={(b) => set({ touch: b })} />
+            <Toggle label="触屏虚拟按键" desc="默认开启：方向与油门/漂移/道具按钮，鼠标可点按" value={settings.touch} onChange={(b) => set({ touch: b })} />
             <Toggle label="相机抖动" desc="碰撞与加速时的镜头反馈" value={settings.cameraShake} onChange={(b) => set({ cameraShake: b })} />
             <Toggle label="幽灵车" desc="计时挑战中回放最佳纪录" value={settings.showGhost} onChange={(b) => set({ showGhost: b })} />
             <div className="rounded-xl bg-white/50 px-3 py-2">

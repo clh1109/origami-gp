@@ -5,20 +5,26 @@ import type {
 import type { RaceConfig } from '../engine/GameEngine';
 
 const SETTINGS_KEY = 'origami-gp-settings';
+// v2：触屏虚拟按键改为全平台默认开启
+const SETTINGS_VERSION = 2;
 
 function loadSettings(): Settings {
   const def: Settings = {
-    shadows: true, highQuality: true, touch: false, volume: 0.7, muted: false,
+    shadows: true, highQuality: true, touch: true, volume: 0.7, muted: false,
     cameraShake: true, showGhost: true,
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...def, ...JSON.parse(raw) };
+    if (raw) {
+      const { v, ...rest } = JSON.parse(raw) as Partial<Settings> & { v?: number };
+      const next: Settings = { ...def, ...rest };
+      // 旧版存档没有"虚拟按键默认开"约定，升级时回到新默认；其余偏好保留
+      if (v !== SETTINGS_VERSION) next.touch = def.touch;
+      return next;
+    }
   } catch {
     /* noop */
   }
-  // 触屏设备默认开启虚拟按键
-  if (typeof window !== 'undefined' && 'ontouchstart' in window) def.touch = true;
   return def;
 }
 
@@ -31,6 +37,7 @@ export const DEFAULT_HUD: HudSnapshot = {
 interface GameStore {
   config: RaceConfig;
   lobbyStep: LobbyStep;
+  bookCover: boolean;
   phase: GamePhase;
   settings: Settings;
   hud: HudSnapshot;
@@ -39,6 +46,7 @@ interface GameStore {
   showSettings: boolean;
   setConfig: (p: Partial<RaceConfig>) => void;
   setLobbyStep: (s: LobbyStep) => void;
+  setBookCover: (b: boolean) => void;
   setPhase: (p: GamePhase) => void;
   setSettings: (p: Partial<Settings>) => void;
   setHud: (h: HudSnapshot) => void;
@@ -50,6 +58,7 @@ interface GameStore {
 export const useGameStore = create<GameStore>((set, get) => ({
   config: { mode: 'grandprix', paperId: 'medium', racerId: 'fox', trackId: 'meadow' },
   lobbyStep: 1,
+  bookCover: false,
   phase: 'lobby',
   settings: loadSettings(),
   hud: DEFAULT_HUD,
@@ -58,12 +67,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
   showSettings: false,
   setConfig: (p) => set({ config: { ...get().config, ...p } }),
   setLobbyStep: (s) => set({ lobbyStep: s }),
+  setBookCover: (b) => set({ bookCover: b }),
   setPhase: (p) => set({ phase: p }),
   setSettings: (p) => {
     const next = { ...get().settings, ...p };
     set({ settings: next });
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...next, v: SETTINGS_VERSION }));
     } catch {
       /* noop */
     }

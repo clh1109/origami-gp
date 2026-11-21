@@ -102,6 +102,7 @@ export default function App() {
     if (!e) return;
     useGameStore.getState().setResults([]);
     useGameStore.getState().setLobbyStep(1);
+    useGameStore.getState().setBookCover(false);
     e.enterLobby(useGameStore.getState().config, 1);
     builtTrackRef.current = useGameStore.getState().config.trackId;
   }, []);

@@ -40,15 +40,23 @@ export class CameraRig {
     this.shakeDecay = 1;
   }
 
-  /** 大厅绕飞 */
-  updateLobby(dt: number, center: THREE.Vector3, radius: number, height: number, time: number): void {
+  /** 大厅绕飞：lookSide > 0 时注视点向镜头左侧偏移，把展示台让到画面右侧黄金区 */
+  updateLobby(dt: number, center: THREE.Vector3, radius: number, height: number, time: number, lookSide = 0): void {
     const angle = time * 0.16;
     this.tmpDesired.set(
       center.x + Math.sin(angle) * radius,
       center.y + height,
       center.z + Math.cos(angle) * radius
     );
-    this.tmpLook.copy(center).add(new THREE.Vector3(0, 2.5, 0));
+    this.tmpLook.copy(center).add(new THREE.Vector3(0, 3.4, 0));
+    if (lookSide !== 0) {
+      // 镜头右向量 = forward × up（水平）
+      const fx = center.x - this.tmpDesired.x;
+      const fz = center.z - this.tmpDesired.z;
+      const len = Math.hypot(fx, fz) || 1;
+      this.tmpLook.x -= (-fz / len) * lookSide;
+      this.tmpLook.z -= (fx / len) * lookSide;
+    }
     const k = this.initialized ? 1 - Math.exp(-3.2 * dt) : 1;
     this.smoothPos.lerp(this.tmpDesired, k);
     this.smoothLook.lerp(this.tmpLook, k);
@@ -73,8 +81,8 @@ export class CameraRig {
   snapToRace(carPos: THREE.Vector3, heading: number): void {
     this.followHeading = heading;
     this.tmpForward.set(Math.sin(heading), 0, Math.cos(heading));
-    this.smoothPos.copy(carPos).addScaledVector(this.tmpForward, -12.5).add(new THREE.Vector3(0, 6.8, 0));
-    this.smoothLook.copy(carPos).addScaledVector(this.tmpForward, 7.5).add(new THREE.Vector3(0, 1.4, 0));
+    this.smoothPos.copy(carPos).addScaledVector(this.tmpForward, -8.5).add(new THREE.Vector3(0, 4.3, 0));
+    this.smoothLook.copy(carPos).addScaledVector(this.tmpForward, 5.8).add(new THREE.Vector3(0, 1.4, 0));
     this.currentFov = 52;
     this.initialized = true;
   }
@@ -94,11 +102,11 @@ export class CameraRig {
 
     this.tmpDesired
       .copy(carPos)
-      .addScaledVector(this.tmpForward, -12.5)
-      .add(new THREE.Vector3(0, 6.8, 0));
+      .addScaledVector(this.tmpForward, -8.5)
+      .add(new THREE.Vector3(0, 4.3, 0));
 
     const actualForward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
-    this.tmpLook.copy(carPos).addScaledVector(actualForward, 7.5).add(new THREE.Vector3(0, 1.4, 0));
+    this.tmpLook.copy(carPos).addScaledVector(actualForward, 5.8).add(new THREE.Vector3(0, 1.4, 0));
 
     const kPos = 1 - Math.exp(-9 * dt);
     const kLook = 1 - Math.exp(-11 * dt);

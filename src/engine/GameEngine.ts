@@ -3,7 +3,7 @@ import { SceneManager } from './SceneManager';
 import { CameraRig } from './CameraRig';
 import { AudioEngine } from './AudioEngine';
 import { ParticleSystem } from '../gameplay/ParticleSystem';
-import { buildTrack, type TrackBuildResult } from '../tracks/TrackBuilder';
+import { buildTrack, type TrackBuildResult, type TrackQueryResult } from '../tracks/TrackBuilder';
 import { buildEnvironment, buildGround, updateClouds, type EnvironmentResult } from '../models/EnvironmentBuilder';
 import { updatePopupProps, popAllInstant } from '../models/PopupPropBuilder';
 import { buildCar } from '../models/CarBuilder';
@@ -45,7 +45,7 @@ export class GameEngine {
   lobbyStep: LobbyStep = 1;
   config: RaceConfig = { mode: 'grandprix', paperId: 'medium', racerId: 'fox', trackId: 'meadow' };
   settings: Settings = {
-    shadows: true, highQuality: true, touch: false, volume: 0.7, muted: false,
+    shadows: true, highQuality: true, touch: true, volume: 0.7, muted: false,
     cameraShake: true, showGhost: true,
   };
 
@@ -217,6 +217,22 @@ export class GameEngine {
     };
   }
 
+  // ================= 贴地 =================
+  /** 坡道高度平滑插值 + 路面切线俯仰（越野时回落到草地 y=0） */
+  private groundFollow(car: CarRuntimeState, q: TrackQueryResult, dt: number): void {
+    const targetY = car.offroad ? 0 : q.point.y;
+    car.pos.y += (targetY - car.pos.y) * Math.min(1, 10 * dt);
+    car.root.position.y = car.pos.y;
+    const tg = q.tangent;
+    const horiz = Math.hypot(tg.x, tg.z);
+    const fwdDot = Math.sin(car.heading) * tg.x + Math.cos(car.heading) * tg.z;
+    const targetPitch = car.offroad || horiz < 1e-4 ? 0 : -Math.atan2(tg.y, horiz) * Math.sign(fwdDot || 1);
+    const prev = (car.root.userData.slopePitch as number) ?? 0;
+    const next = prev + (targetPitch - prev) * Math.min(1, 8 * dt);
+    car.root.userData.slopePitch = next;
+    car.tiltGroup.rotation.x = car.pitch + next;
+  }
+
   // ================= 大厅 =================
   enterLobby(config: RaceConfig, step: LobbyStep): void {
     this.config = config;
@@ -308,6 +324,11 @@ export class GameEngine {
         this.cars.push(this.makeCar(r.id, config.paperId, false, false, g.pos, g.heading, skill, offset));
       }
     }
+    // 发车格对齐：立即贴合坡道高度与俯仰
+    for (const car of this.cars) {
+      if (car.isGhost) continue;
+      this.groundFollow(car, track.query(car.pos), 1);
+    }
     // 排序发车格：玩家第 1 位
     this.phase = 'countdown';
     this.rig.setMode('race');
@@ -349,12 +370,20 @@ export class GameEngine {
       case 'trap': {
         const back = new THREE.Vector3(-Math.sin(car.heading), 0, -Math.cos(car.heading));
         const pos = car.pos.clone().addScaledVector(back, 3.2);
+        const tq = this.track ? this.track.query(pos) : null;
+        pos.y = tq ? tq.point.y : 0;
         const mesh = new THREE.Mesh(
           new THREE.BoxGeometry(3, 0.12, 3),
           new THREE.MeshStandardMaterial({ color: 0xffd166, roughness: 0.6, transparent: true, opacity: 0.9, emissive: 0xffd166, emissiveIntensity: 0.2 })
         );
-        mesh.position.set(pos.x, 0.14, pos.z);
+        mesh.position.set(pos.x, pos.y + 0.14, pos.z);
+        mesh.rotation.order = 'YXZ';
         mesh.rotation.y = car.heading;
+        if (tq) {
+          const tg = tq.tangent;
+          const fwdDot = Math.sin(car.heading) * tg.x + Math.cos(car.heading) * tg.z;
+          mesh.rotation.x = -Math.atan2(tg.y, Math.hypot(tg.x, tg.z)) * Math.sign(fwdDot || 1);
+        }
         this.sm.scene.add(mesh);
         this.traps.push({ mesh, pos, owner: car.id, life: 9, armed: 0.8 });
         this.audio.playTrap();
@@ -399,7 +428,16 @@ export class GameEngine {
     else if (this.phase === 'finished') this.updateFinished(dt);
 
     if (this.env) updateClouds(this.env.clouds, this.time);
-    if (this.track) for (const b of this.track.itemBoxes) if (b.active) b.mesh.rotation.y += dt * 1.2;
+    if (this.track) {
+      // 加速带箭头向前滚动
+      const boostTex = this.track.group.userData.boostTex as THREE.Texture | undefined;
+      if (boostTex) boostTex.offset.y = (this.time * 1.2) % 1;
+      for (const b of this.track.itemBoxes) {
+        if (!b.active) continue;
+        b.mesh.rotation.y += dt * 1.2;
+        b.mesh.position.y = (b.mesh.userData.baseY as number) + Math.sin(this.time * 2.2 + b.t * 20) * 0.16;
+      }
+    }
     this.particles.update(dt);
     this.sm.render(dt);
   }
@@ -416,8 +454,8 @@ export class GameEngine {
       this.rig.updateShowcase(dt, this.tmpV.set(center.x, 0.7, center.z));
       this.sm.updateShadowFocus(this.tmpV.set(center.x, 0.7, center.z));
     } else {
-      const span = Math.max(this.track.bounds.maxX - this.track.bounds.minX, this.track.bounds.maxZ - this.track.bounds.minZ);
-      this.rig.updateLobby(dt, center, span * 0.6, 30, this.time);
+      // 收紧半径与高度：展示圆台稳定落在左侧手账面板右边的视觉黄金区
+      this.rig.updateLobby(dt, center, 17, 8.5, this.time, 3.6);
       this.sm.updateShadowFocus(center);
     }
     updatePopupProps(this.track.props, this.tmpV.set(center.x, 0, center.z), dt);
@@ -471,6 +509,7 @@ export class GameEngine {
       const q = track.query(car.pos);
       car.offroad = computeOffroad(car, q.dist, track.width / 2);
       stepCarPhysics(car, input, dt);
+      this.groundFollow(car, q, dt);
 
       // 圈数 / 进度
       const t = q.t;
@@ -671,6 +710,9 @@ export class GameEngine {
     for (const car of this.cars) {
       if (car.isGhost) continue;
       stepCarPhysics(car, { throttle: 0, steer: 0, drift: false }, dt);
+      const q = this.track.query(car.pos);
+      car.offroad = computeOffroad(car, q.dist, this.track.width / 2);
+      this.groundFollow(car, q, dt);
     }
     const maxSpeed = 40;
     this.rig.updateRace(dt, this.player.pos, this.player.heading, this.player.speed, maxSpeed, false);

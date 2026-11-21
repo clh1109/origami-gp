@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TrackSpec, PopupPropRig, ItemBoxEntity, BoostPadEntity } from '../types/game';
 import { createPaperMaterial, createEmissivePaper, paperMesh, attachOrigamiEdges } from '../materials/PaperMaterial';
 import { getChecker, getPaperFiberBump } from '../materials/PaperTextures';
-import { buildPopupProp } from '../models/PopupPropBuilder';
+import { buildPopupProp, getFenceSectionGeos, getBushGeo, getFlowerGeos } from '../models/PopupPropBuilder';
 
 export interface TrackQueryResult {
   t: number;
@@ -50,6 +51,39 @@ function questionTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+/** 高饱和橙黄加速带 + 亮白滚动箭头（Canvas 纹理，offset.y 由引擎每帧推进） */
+function boostArrowTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const ctx = c.getContext('2d')!;
+  // 深橙底：补偿白天强光 + ACES 的提亮，屏幕上仍呈高饱和橙黄
+  ctx.fillStyle = '#d96a00';
+  ctx.fillRect(0, 0, 128, 256);
+  ctx.fillStyle = 'rgba(255,220,160,0.10)';
+  for (let x = 0; x < 128; x += 16) ctx.fillRect(x, 0, 8, 256);
+  // 雪佛龙顶点朝画布下方 = 行进方向；间距取 256/3 保证无缝滚动
+  ctx.strokeStyle = '#fffdf8';
+  ctx.lineWidth = 14;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let k = 0; k < 3; k++) {
+    const y0 = 12 + (k * 256) / 3;
+    ctx.beginPath();
+    ctx.moveTo(20, y0);
+    ctx.lineTo(64, y0 + 42);
+    ctx.lineTo(108, y0);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.repeat.set(1, 2);
+  tex.anisotropy = 4;
+  return tex;
+}
+
 export function buildTrack(spec: TrackSpec): TrackBuildResult {
   const group = new THREE.Group();
   const pts = spec.points.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
@@ -85,7 +119,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     return new THREE.Vector3(-tg.z, 0, tg.x).normalize();
   };
 
-  // ---------- 路面 ----------
+  // ---------- 路面（沿样条 p.y 起伏，形成 3D 坡道纸带） ----------
   const roadPos: number[] = [];
   const roadUv: number[] = [];
   const roadIdx: number[] = [];
@@ -95,7 +129,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     const n = normalAt(idx);
     const l = p.clone().addScaledVector(n, -half);
     const r = p.clone().addScaledVector(n, half);
-    roadPos.push(l.x, 0.05, l.z, r.x, 0.05, r.z);
+    roadPos.push(l.x, p.y + 0.05, l.z, r.x, p.y + 0.05, r.z);
     roadUv.push(0, i / 8, 1, i / 8);
     if (i < ROAD_SAMPLES) {
       const a = i * 2;
@@ -113,7 +147,51 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
   road.receiveShadow = true;
   group.add(road);
 
-  // ---------- 红白路肩（顶点色交替） ----------
+  // ---------- 赛道白色虚线中心标线 (Dashed Centerline) ----------
+  const dashPos: number[] = [];
+  const dashIdx: number[] = [];
+  const dashW = 0.42;
+  let dashVerts = 0;
+  for (let i = 0; i < ROAD_SAMPLES; i++) {
+    // 6 个切片为一个周期：前 3 个铺设白色折纸虚线，后 3 个留空
+    if (i % 6 >= 3) continue;
+    const p0 = samples[i];
+    const p1 = samples[(i + 1) % ROAD_SAMPLES];
+    const n0 = normalAt(i);
+    const n1 = normalAt((i + 1) % ROAD_SAMPLES);
+    const l0 = p0.clone().addScaledVector(n0, -dashW / 2);
+    const r0 = p0.clone().addScaledVector(n0, dashW / 2);
+    const l1 = p1.clone().addScaledVector(n1, -dashW / 2);
+    const r1 = p1.clone().addScaledVector(n1, dashW / 2);
+    dashPos.push(
+      l0.x, p0.y + 0.08, l0.z,
+      r0.x, p0.y + 0.08, r0.z,
+      l1.x, p1.y + 0.08, l1.z,
+      r1.x, p1.y + 0.08, r1.z
+    );
+    const b = dashVerts;
+    dashIdx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+    dashVerts += 4;
+  }
+  if (dashPos.length > 0) {
+    const dashGeo = new THREE.BufferGeometry();
+    dashGeo.setAttribute('position', new THREE.Float32BufferAttribute(dashPos, 3));
+    dashGeo.setIndex(dashIdx);
+    dashGeo.computeVertexNormals();
+    const dashMat = new THREE.MeshStandardMaterial({
+      color: 0xfffdf8,
+      roughness: 0.92,
+      metalness: 0,
+      flatShading: true,
+      bumpMap: getPaperFiberBump(),
+      bumpScale: 0.03,
+    });
+    const dashes = new THREE.Mesh(dashGeo, dashMat);
+    dashes.receiveShadow = true;
+    group.add(dashes);
+  }
+
+  // ---------- 红白路肩（顶点色交替，随坡道起伏，闭环无接缝） ----------
   const curbW = 1.3;
   const curbPos: number[] = [];
   const curbCol: number[] = [];
@@ -123,16 +201,16 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
   let vertCount = 0;
   const segLen = 4;
   for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < ROAD_SAMPLES; i++) {
+    for (let i = 0; i <= ROAD_SAMPLES; i++) {
       const idx = i % ROAD_SAMPLES;
       const p = samples[idx];
       const n = normalAt(idx);
       const inner = p.clone().addScaledVector(n, side * half);
       const outer = p.clone().addScaledVector(n, side * (half + curbW));
-      const col = Math.floor(i / segLen) % 2 === 0 ? cA : cB;
-      curbPos.push(inner.x, 0.12, inner.z, outer.x, 0.12, outer.z);
+      const col = Math.floor(idx / segLen) % 2 === 0 ? cA : cB;
+      curbPos.push(inner.x, p.y + 0.12, inner.z, outer.x, p.y + 0.12, outer.z);
       curbCol.push(col.r, col.g, col.b, col.r, col.g, col.b);
-      if (i < ROAD_SAMPLES - 1) {
+      if (i < ROAD_SAMPLES) {
         const a = vertCount;
         curbIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
       }
@@ -157,7 +235,80 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
   curbs.castShadow = false;
   group.add(curbs);
 
-  // ---------- 棋盘格起跑线 ----------
+  // ---------- 卡纸厚度裙边：路肩外沿垂直向下 1.4，高架段像有厚度的折纸带 ----------
+  const skirtPos: number[] = [];
+  const skirtIdx: number[] = [];
+  let skirtVert = 0;
+  for (let side = -1; side <= 1; side += 2) {
+    for (let i = 0; i <= ROAD_SAMPLES; i++) {
+      const idx = i % ROAD_SAMPLES;
+      const p = samples[idx];
+      const n = normalAt(idx);
+      const e = p.clone().addScaledVector(n, side * (half + curbW));
+      const topY = p.y + 0.12;
+      skirtPos.push(e.x, topY, e.z, e.x, topY - 1.4, e.z);
+      if (i < ROAD_SAMPLES) {
+        const a = skirtVert;
+        skirtIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+      skirtVert += 2;
+    }
+  }
+  const skirtGeo = new THREE.BufferGeometry();
+  skirtGeo.setAttribute('position', new THREE.Float32BufferAttribute(skirtPos, 3));
+  skirtGeo.setIndex(skirtIdx);
+  skirtGeo.computeVertexNormals();
+  const skirtMat = new THREE.MeshStandardMaterial({
+    color: 0xe8dcc8,
+    roughness: 0.92,
+    metalness: 0,
+    flatShading: true,
+    side: THREE.DoubleSide,
+    bumpMap: getPaperFiberBump(),
+    bumpScale: 0.04,
+  });
+  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+  skirt.castShadow = true;
+  skirt.receiveShadow = true;
+  group.add(skirt);
+
+  // ---------- 高架段折纸桥墩（V 形折叠支撑，立体书结构感） ----------
+  const pierGeos: THREE.BufferGeometry[] = [];
+  {
+    const pierProto = new THREE.BoxGeometry(w * 0.62, 1, 0.36);
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const sc = new THREE.Vector3();
+    for (let i = 0; i < ROAD_SAMPLES; i += 12) {
+      const p = samples[i];
+      if (p.y < 1.5) continue;
+      const tg = tangents[i];
+      const heading = Math.atan2(tg.x, tg.z);
+      const h = p.y - 0.05;
+      for (const fold of [-0.42, 0.42]) {
+        const g = pierProto.clone();
+        e.set(0, heading + fold, 0, 'YXZ');
+        q.setFromEuler(e);
+        m4.compose(new THREE.Vector3(p.x, h / 2, p.z), q, sc.set(1, h, 1));
+        g.applyMatrix4(m4);
+        pierGeos.push(g.index ? g.toNonIndexed() : g);
+        if (g.index) g.dispose();
+      }
+    }
+    pierProto.dispose();
+    if (pierGeos.length) {
+      const merged = mergeGeometries(pierGeos, false);
+      pierGeos.forEach((g) => g.dispose());
+      if (merged) {
+        const piers = new THREE.Mesh(merged, createPaperMaterial(0xd9c9a8, getPaperFiberBump(), 0.92));
+        attachOrigamiEdges(piers, 22);
+        group.add(piers);
+      }
+    }
+  }
+
+  // ---------- 棋盘格起跑线（贴合坡道切线俯仰） ----------
   const startT = 0;
   const sp = curve.getPointAt(startT);
   const st = curve.getTangentAt(startT);
@@ -169,38 +320,48 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     roughness: 0.9,
     metalness: 0,
   });
+  const startGroup = new THREE.Group();
+  startGroup.rotation.order = 'YXZ';
+  startGroup.rotation.y = startHeading;
+  startGroup.rotation.x = -Math.atan2(st.y, Math.hypot(st.x, st.z));
+  startGroup.position.set(sp.x, sp.y + 0.09, sp.z);
   const startLine = new THREE.Mesh(new THREE.PlaneGeometry(w, 3.4), startMat);
   startLine.rotation.x = -Math.PI / 2;
-  startLine.rotation.z = -startHeading;
-  startLine.position.set(sp.x, 0.09, sp.z);
   startLine.receiveShadow = true;
-  group.add(startLine);
+  startGroup.add(startLine);
+  group.add(startGroup);
 
-  // ---------- 发光加速带 ----------
+  // ---------- 发光加速带（橙黄滚动箭头，随坡道对齐） ----------
   const boostPads: BoostPadEntity[] = [];
-  const boostColor = spec.theme === 'neon' ? 0xffd166 : spec.theme === 'frost' ? 0x9fd4ea : 0xf4d35e;
+  const boostTex = boostArrowTexture();
+  group.userData.boostTex = boostTex;
+  const padMat = new THREE.MeshStandardMaterial({
+    map: boostTex,
+    emissive: 0xffffff,
+    emissiveMap: boostTex,
+    emissiveIntensity: 0.3,
+    roughness: 0.75,
+    metalness: 0,
+  });
   for (const bt of spec.boostT) {
     const p = curve.getPointAt(bt);
     const tg = curve.getTangentAt(bt);
     const heading = Math.atan2(tg.x, tg.z);
     const padGroup = new THREE.Group();
-    const pad = new THREE.Mesh(
-      new THREE.PlaneGeometry(w * 0.7, 5),
-      createEmissivePaper(boostColor, boostColor, 1.1)
-    );
-    pad.rotation.x = -Math.PI / 2;
-    padGroup.add(pad);
-    // 箭头雪佛龙
-    for (let k = 0; k < 3; k++) {
-      const chev = paperMesh(new THREE.ConeGeometry(1.1, 1.6, 3), 0xfffdf8, { edges: false });
-      chev.rotation.x = -Math.PI / 2;
-      chev.rotation.z = Math.PI;
-      chev.position.set(0, 0.06, -1.4 + k * 1.4);
-      chev.scale.set(1, 1, 0.2);
-      padGroup.add(chev);
-    }
-    padGroup.position.set(p.x, 0.1, p.z);
+    padGroup.rotation.order = 'YXZ';
     padGroup.rotation.y = heading;
+    padGroup.rotation.x = -Math.atan2(tg.y, Math.hypot(tg.x, tg.z));
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.7, 5), padMat);
+    pad.rotation.x = -Math.PI / 2;
+    pad.receiveShadow = true;
+    padGroup.add(pad);
+    // 两侧牛皮纸包边
+    for (const s of [-1, 1]) {
+      const rail = paperMesh(new THREE.BoxGeometry(0.28, 0.16, 5), 0xe8dcc8, { edges: false });
+      rail.position.set(s * (w * 0.35 + 0.16), 0.05, 0);
+      padGroup.add(rail);
+    }
+    padGroup.position.set(p.x, p.y + 0.1, p.z);
     group.add(padGroup);
     boostPads.push({ mesh: padGroup, t: bt, pos: p.clone(), dir: tg.clone() });
   }
@@ -225,7 +386,8 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
       const pos = p.clone().addScaledVector(n, k * (w * 0.18));
       const box = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.7, 1.7), boxMat);
       attachOrigamiEdges(box, 20);
-      box.position.set(pos.x, 1.5, pos.z);
+      box.position.set(pos.x, pos.y + 1.5, pos.z);
+      box.userData.baseY = pos.y + 1.5;
       box.castShadow = true;
       group.add(box);
       itemBoxes.push({ mesh: box, pos: pos.clone(), t: it, respawn: 0, active: true });
@@ -250,6 +412,120 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     rig.rootPivot.scale.setScalar(s);
     group.add(rig.rootPivot);
     props.push(rig);
+  }
+
+  // ---------- 弯道小栅栏 / 灌木带 / 彩色纸花簇（合并为少量静态网格） ----------
+  {
+    const fenceWhite: THREE.BufferGeometry[] = [];
+    const fenceWood: THREE.BufferGeometry[] = [];
+    const bushGeos: THREE.BufferGeometry[] = [];
+    const stemGeos: THREE.BufferGeometry[] = [];
+    const headBuckets = new Map<number, THREE.BufferGeometry[]>();
+    const fenceProto = getFenceSectionGeos();
+    const bushProto = getBushGeo();
+    const flowerProto = getFlowerGeos();
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const sc = new THREE.Vector3();
+    const place = (
+      list: THREE.BufferGeometry[],
+      proto: THREE.BufferGeometry,
+      pos: THREE.Vector3,
+      rotY: number,
+      scale: number
+    ): void => {
+      let g = proto.clone();
+      e.set(0, rotY, 0, 'YXZ');
+      q.setFromEuler(e);
+      m4.compose(pos, q, sc.setScalar(scale));
+      g.applyMatrix4(m4);
+      if (g.index) {
+        const ng = g.toNonIndexed();
+        g.dispose();
+        g = ng;
+      }
+      list.push(g);
+    };
+    const addMerged = (geos: THREE.BufferGeometry[], mat: THREE.Material, edges = false): void => {
+      if (!geos.length) return;
+      const merged = mergeGeometries(geos, false);
+      geos.forEach((g) => g.dispose());
+      if (!merged) return;
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      if (edges) attachOrigamiEdges(mesh, 22);
+      group.add(mesh);
+    };
+
+    for (let i = 0; i < ROAD_SAMPLES; i += 2) {
+      const tgA = tangents[i];
+      const tgB = tangents[(i + 5) % ROAD_SAMPLES];
+      const crossY = tgA.z * tgB.x - tgA.x * tgB.z;
+      const dot = tgA.x * tgB.x + tgA.z * tgB.z;
+      const turn = Math.atan2(crossY, dot);
+      const p = samples[i];
+      if (Math.abs(turn) > 0.16) {
+        // 急弯外侧：左转 → 外侧在右（normalAt 方向）
+        const side = turn > 0 ? 1 : -1;
+        const n = normalAt(i);
+        const elevated = p.y > 1.2;
+        const off = elevated ? half + curbW - 0.02 : half + curbW + 1.05;
+        const pos = p.clone().addScaledVector(n, side * off);
+        pos.y = elevated ? p.y + 0.12 : 0;
+        const heading = Math.atan2(tgA.x, tgA.z) - Math.PI / 2;
+        const bucket = Math.floor(i / 2) % 2 === 0 ? fenceWhite : fenceWood;
+        const s = elevated ? 0.8 : 1;
+        for (const proto of fenceProto) place(bucket, proto, pos, heading, s);
+      } else if (i % 10 === 0 && p.y < 1.2) {
+        // 缓弯 / 直道外侧灌木带（草地高度）
+        const side = (i / 10) % 2 === 0 ? 1 : -1;
+        const n = normalAt(i);
+        const off = half + curbW + 1.7 + Math.random() * 2.4;
+        const pos = p.clone().addScaledVector(n, side * off);
+        pos.y = 0;
+        place(bushGeos, bushProto, pos, Math.random() * Math.PI, 0.75 + Math.random() * 0.6);
+        const pos2 = pos.clone().addScaledVector(tangents[i], 1.3 + Math.random());
+        place(bushGeos, bushProto, pos2, Math.random() * Math.PI, 0.45 + Math.random() * 0.4);
+      }
+    }
+
+    // 彩色纸花簇：草地上随机团簇，填补留白
+    const petalPalette = [0xe05a47, 0xf4d35e, 0xf4a6b8, 0xb79ced, 0xff9f1c];
+    for (let c = 0; c < 44; c++) {
+      const t = Math.random();
+      const p = curve.getPointAt(t);
+      const tg = curve.getTangentAt(t);
+      const n = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
+      const side = Math.random() > 0.5 ? 1 : -1;
+      const base = p.clone().addScaledVector(n, side * (half + 3.5 + Math.random() * 13));
+      base.y = 0;
+      const count = 5 + Math.floor(Math.random() * 3);
+      for (let k = 0; k < count; k++) {
+        const pos = base.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.2, 0, (Math.random() - 0.5) * 2.2));
+        const s = 0.7 + Math.random() * 0.7;
+        const rotY = Math.random() * Math.PI;
+        place(stemGeos, flowerProto.stem, pos, rotY, s);
+        const color = petalPalette[Math.floor(Math.random() * petalPalette.length)];
+        let bucket = headBuckets.get(color);
+        if (!bucket) {
+          bucket = [];
+          headBuckets.set(color, bucket);
+        }
+        place(bucket, flowerProto.head, pos, rotY, s);
+      }
+    }
+
+    const night = spec.theme === 'neon';
+    addMerged(fenceWhite, createPaperMaterial(night ? 0xdfe6f2 : 0xfffdf8, getPaperFiberBump(), 0.9), true);
+    addMerged(fenceWood, createPaperMaterial(night ? 0x3a4a72 : 0xd9c9a8, getPaperFiberBump(), 0.92), true);
+    const bushColor = spec.theme === 'meadow' ? 0x7fae76 : spec.theme === 'frost' ? 0xeaf6fb : spec.theme === 'desk' ? 0xd9c9a8 : 0x2b3752;
+    addMerged(bushGeos, createPaperMaterial(bushColor, getPaperFiberBump(), 0.95));
+    addMerged(stemGeos, createPaperMaterial(night ? 0x3a4a72 : 0x6f9f6a, getPaperFiberBump(), 0.95));
+    headBuckets.forEach((geos, color) => {
+      addMerged(geos, night ? createEmissivePaper(color, color, 0.55) : createPaperMaterial(color, getPaperFiberBump(), 0.85));
+    });
   }
 
   // ---------- 发车格（起跑线之后，避免开局即误判过线） ----------

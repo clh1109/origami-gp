@@ -15,11 +15,11 @@ const TiltShiftShader = {
     resolution: { value: new THREE.Vector2(1, 1) },
     direction: { value: new THREE.Vector2(1, 0) },
     focusY: { value: 0.55 },
-    band: { value: 0.2 },
-    maxBlur: { value: 2.6 },
+    band: { value: 0.22 },
+    maxBlur: { value: 2.8 },
     grade: { value: 0 }, // 1 时在竖向 pass 做调色
-    saturation: { value: 1.14 },
-    warmth: { value: 0.035 },
+    saturation: { value: 1.18 },
+    warmth: { value: 0.045 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -54,6 +54,10 @@ const TiltShiftShader = {
         float l = dot(col, vec3(0.299, 0.587, 0.114));
         col = mix(vec3(l), col, saturation);
         col += vec3(warmth, warmth * 0.45, -warmth * 0.5) * (0.35 + 0.65 * l);
+        // 微距暗角（Vignette）：边缘产生柔和的摄影微距暗部过渡
+        vec2 vigUv = (vUv - 0.5) * 1.85;
+        float vig = 1.0 - dot(vigUv, vigUv) * 0.14;
+        col *= clamp(vig, 0.82, 1.0);
         col = clamp(col, 0.0, 1.0);
       }
       gl_FragColor = vec4(col, c.a);
