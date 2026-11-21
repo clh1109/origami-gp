@@ -1,13 +1,18 @@
 import * as THREE from 'three';
 import type { PopupPropRig, PropTheme, TrackColors } from '../types/game';
-import { paperMesh, createEmissivePaper, createTranslucentPaper, attachOrigamiEdges } from '../materials/PaperMaterial';
+import {
+  paperMesh,
+  createEmissivePaper,
+  createTranslucentPaper,
+  attachOrigamiEdges,
+  createCutoutCardboardMaterials,
+  createTexturedPaperMaterial,
+} from '../materials/PaperMaterial';
 
 /**
- * 3 级父子关节立体书景物：
- * RootPivot(地面 y=0) → BodyGroup(主干) → TopGroup(树冠/花瓣/风车叶)。
- * 初始贴地平躺，靠近玩家时按时间轴弹起展开。
+ * 3 级父子关节立体书景物（剪纸白边插画卡纸 + 底部 V 形折页铰链）：
+ * RootPivot(地面 y=0) -> BodyGroup(主干/底座) -> TopGroup(剪纸树冠/花盘/风车叶)。
  */
-
 function easeOutBack(x: number): number {
   const c1 = 1.70158;
   const c3 = c1 + 1;
@@ -20,16 +25,241 @@ interface PropParts {
   spinner?: THREE.Object3D;
 }
 
-/** 立体书底部 45° V 形折纸拉条支撑铰链（V-Fold Tab） */
+// ---------- 缓存的手绘白边剪纸纹理与几何 ----------
+const treeMatCache = new Map<string, [THREE.MeshStandardMaterial, THREE.MeshStandardMaterial]>();
+const flowerMatCache = new Map<number, [THREE.MeshStandardMaterial, THREE.MeshStandardMaterial]>();
+let cachedTreeGeo: THREE.ExtrudeGeometry | null = null;
+let cachedFlowerGeo: THREE.ExtrudeGeometry | null = null;
+let cachedNoteTex: THREE.CanvasTexture | null = null;
+
+/** 归一化 ExtrudeGeometry 的正背面 UV 到 [0, 1]，确保手绘插画与剪纸轮廓严格对齐 */
+function normalizeExtrudeUV(geo: THREE.ExtrudeGeometry, halfW: number, height: number): void {
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) {
+    const ux = (uv.getX(i) + halfW) / (halfW * 2);
+    const uy = uv.getY(i) / height;
+    uv.setXY(i, ux, uy);
+  }
+  uv.needsUpdate = true;
+}
+
+/** 立体书剪纸松树轮廓挤出体（带 0.14 厚度米白卡纸切边） */
+function getDieCutTreeGeo(): THREE.ExtrudeGeometry {
+  if (cachedTreeGeo) return cachedTreeGeo;
+  const s = new THREE.Shape();
+  // 三层锯齿剪纸松树轮廓，范围 x ∈ [-2.4, 2.4], y ∈ [0, 5.4]
+  s.moveTo(-0.36, 0);
+  s.lineTo(0.36, 0);
+  s.lineTo(0.42, 1.0);
+  s.lineTo(2.35, 1.12);
+  s.lineTo(1.32, 2.45);
+  s.lineTo(1.95, 2.55);
+  s.lineTo(0.95, 3.85);
+  s.lineTo(1.38, 3.95);
+  s.lineTo(0.0, 5.4);
+  s.lineTo(-1.38, 3.95);
+  s.lineTo(-0.95, 3.85);
+  s.lineTo(-1.95, 2.55);
+  s.lineTo(-1.32, 2.45);
+  s.lineTo(-2.35, 1.12);
+  s.lineTo(-0.42, 1.0);
+  s.closePath();
+
+  const depth = 0.14;
+  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false });
+  normalizeExtrudeUV(geo, 2.4, 5.4);
+  geo.translate(0, 0, -depth / 2);
+  cachedTreeGeo = geo;
+  return geo;
+}
+
+/** 手绘水彩剪纸树贴图（四周留米白裁切边 + 树冠色阶 + 彩铅叶脉与小红果点缀） */
+function getDieCutTreeMaterials(
+  key: string,
+  cDark: string,
+  cMid: string,
+  cLight: string
+): [THREE.MeshStandardMaterial, THREE.MeshStandardMaterial] {
+  const hit = treeMatCache.get(key);
+  if (hit) return hit;
+
+  const W = 256;
+  const H = 288;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+
+  // 底色铺米白卡纸白边
+  ctx.fillStyle = '#fcf8ee';
+  ctx.fillRect(0, 0, W, H);
+
+  // 内部留出 10px 裁切白边后画树干与三层水彩松枝
+  const drawTri = (cx: number, topY: number, botY: number, halfW: number, fill: string) => {
+    ctx.beginPath();
+    ctx.moveTo(cx, topY);
+    ctx.lineTo(cx + halfW, botY);
+    ctx.lineTo(cx - halfW, botY);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+  };
+
+  // 树干
+  ctx.fillStyle = '#8b6343';
+  ctx.fillRect(W / 2 - 14, H - 62, 28, 56);
+
+  // 三层水彩渐变树冠（内缩保留白边）
+  drawTri(W / 2, 118, 224, 108, cDark);
+  drawTri(W / 2, 66, 152, 86, cMid);
+  drawTri(W / 2, 14, 92, 58, cLight);
+
+  // 柔和纸纹竖向叶脉笔触
+  ctx.strokeStyle = 'rgba(255, 250, 238, 0.32)';
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 18; i++) {
+    const px = W / 2 + (Math.random() - 0.5) * 120;
+    const py = 55 + Math.random() * 155;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + (px < W / 2 ? -10 : 10), py + 14);
+    ctx.stroke();
+  }
+
+  // 点缀几颗暖色小浆果/小花点
+  const dots = [
+    [W / 2 - 34, 185],
+    [W / 2 + 42, 178],
+    [W / 2 - 18, 122],
+    [W / 2 + 24, 108],
+    [W / 2 + 4, 62],
+  ];
+  for (const [dx, dy] of dots) {
+    ctx.beginPath();
+    ctx.arc(dx, dy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#f4d35e';
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mats = createCutoutCardboardMaterials(tex, 0xfcf8ee);
+  treeMatCache.set(key, mats);
+  return mats;
+}
+
+/** 剪纸花盘轮廓挤出体（8 瓣花朵白卡纸） */
+function getDieCutFlowerGeo(): THREE.ExtrudeGeometry {
+  if (cachedFlowerGeo) return cachedFlowerGeo;
+  const s = new THREE.Shape();
+  const petals = 8;
+  const steps = 48;
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    const r = 1.08 + Math.abs(Math.sin(a * (petals / 2))) * 0.34;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r + 1.45;
+    if (i === 0) s.moveTo(x, y);
+    else s.lineTo(x, y);
+  }
+  s.closePath();
+
+  const depth = 0.09;
+  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false });
+  normalizeExtrudeUV(geo, 1.45, 2.9);
+  geo.translate(0, -1.45, -depth / 2);
+  cachedFlowerGeo = geo;
+  return geo;
+}
+
+function getDieCutFlowerMaterials(petalHex: number): [THREE.MeshStandardMaterial, THREE.MeshStandardMaterial] {
+  const hit = flowerMatCache.get(petalHex);
+  if (hit) return hit;
+
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const cx = size / 2;
+  const cy = size / 2;
+
+  ctx.fillStyle = '#fcf8ee';
+  ctx.fillRect(0, 0, size, size);
+
+  // 8 瓣手绘花瓣（外围保留一圈米白剪纸边）
+  ctx.fillStyle = `#${petalHex.toString(16).padStart(6, '0')}`;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.ellipse(cx + Math.cos(a) * 32, cy + Math.sin(a) * 32, 18, 12, a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 暖黄花蕊 + 虚线手绘圈
+  ctx.beginPath();
+  ctx.arc(cx, cy, 20, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffb732';
+  ctx.fill();
+
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#fcf8ee';
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mats = createCutoutCardboardMaterials(tex, 0xfcf8ee);
+  flowerMatCache.set(petalHex, mats);
+  return mats;
+}
+
+function getStickyNoteTexture(): THREE.CanvasTexture {
+  if (cachedNoteTex) return cachedNoteTex;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#fff5b8';
+  ctx.fillRect(0, 0, 128, 128);
+
+  // 浅蓝横线手账便签
+  ctx.strokeStyle = 'rgba(110, 150, 195, 0.35)';
+  ctx.lineWidth = 2;
+  for (let y = 30; y < 118; y += 16) {
+    ctx.beginPath();
+    ctx.moveTo(12, y);
+    ctx.lineTo(116, y);
+    ctx.stroke();
+  }
+
+  // 顶部粉色和纸胶带
+  ctx.fillStyle = 'rgba(244, 166, 184, 0.85)';
+  ctx.fillRect(36, 4, 56, 16);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  cachedNoteTex = tex;
+  return tex;
+}
+
+/** 立体书底部 45° V 形折纸拉条支撑铰链 (V-Fold Tab) */
 function createVFoldTab(width = 0.8, height = 0.9, color = 0xded2be): THREE.Mesh {
   const tabGeo = new THREE.BufferGeometry();
   const w = width / 2;
   const h = height;
-  // 底部贴地向斜上方支撑的三角折页
   const verts = [
-    -w, 0, 0,   w, 0, 0,   0, h, -h * 0.5,
-    -w, 0, 0,   0, h, -h * 0.5,  -w * 0.4, 0, -h * 0.4,
-     w, 0, 0,   w * 0.4, 0, -h * 0.4,   0, h, -h * 0.5,
+    -w, 0, 0,
+    w, 0, 0,
+    0, h, -h * 0.5,
+
+    -w, 0, 0,
+    0, h, -h * 0.5,
+    -w * 0.4, 0, -h * 0.4,
+
+    w, 0, 0,
+    w * 0.4, 0, -h * 0.4,
+    0, h, -h * 0.5,
   ];
   tabGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   tabGeo.computeVertexNormals();
@@ -38,51 +268,48 @@ function createVFoldTab(width = 0.8, height = 0.9, color = 0xded2be): THREE.Mesh
   return tab;
 }
 
-// ---------- 草甸 ----------
-function pineTree(colors: TrackColors): PropParts {
+// ---------- 草甸（升级为夹心白边插画剪纸立体书） ----------
+function pineTree(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
 
-  // 立体书底部 45° V 形折纸拉条支撑
-  body.add(createVFoldTab(1.1, 1.3, 0xd0c4ae));
+  body.add(createVFoldTab(1.2, 1.3, 0xd8cbb4));
 
-  // 六棱纸木树干
-  const trunk = paperMesh(new THREE.CylinderGeometry(0.32, 0.46, 2.4, 6), 0x725438);
-  trunk.position.y = 1.2;
-  body.add(trunk);
+  const palettes: [string, string, string, string][] = [
+    ['spring', '#4c804b', '#67a160', '#8cc27e'],
+    ['mint', '#4a8572', '#64a38d', '#8ec7b0'],
+    ['warm', '#6d8f47', '#8cb05c', '#b0cf7a'],
+  ];
+  const [key, cD, cM, cL] = palettes[Math.floor(Math.random() * palettes.length)];
+  const geo = getDieCutTreeGeo();
+  const mats = getDieCutTreeMaterials(key, cD, cM, cL);
 
-  // 四层错落多边折纸波浪树冠（边缘带平滑折切，由浅至深）
-  const greens = [0x52824e, 0x64975e, 0x7bb075, 0x92c48b];
-  for (let i = 0; i < 4; i++) {
-    const r = 2.7 - i * 0.52;
-    const h = 2.2 - i * 0.22;
-    // 使用 8 边锥体，配合每层 45° 错位旋转，形成立体书剪纸锯齿层叠
-    const cone = paperMesh(new THREE.ConeGeometry(r, h, 8), greens[i]);
-    cone.position.y = 2.0 + i * 1.35 + h / 2 - 0.5;
-    cone.rotation.y = (i * Math.PI) / 4;
-    top.add(cone);
+  // 两张厚卡纸剪纸树十字插接（立体书经典卡槽结构）
+  for (let k = 0; k < 2; k++) {
+    const slab = new THREE.Mesh(geo, mats);
+    slab.rotation.y = (k * Math.PI) / 2;
+    slab.castShadow = true;
+    slab.receiveShadow = true;
+    top.add(slab);
   }
-  top.position.y = 0;
+
   return { body, top };
 }
 
-function pinwheel(colors: TrackColors): PropParts {
+function pinwheel(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
 
-  // 底部纸条铰链
   body.add(createVFoldTab(0.8, 1.1, 0xd8cca8));
 
-  // 木色折纸支柱
   const stick = paperMesh(new THREE.CylinderGeometry(0.12, 0.16, 4.5, 6), 0xd9c9a8);
   stick.position.y = 2.25;
   body.add(stick);
 
   const spinner = new THREE.Group();
   const bladeColors = [0xe05a47, 0xf4d35e, 0x4b8ab0, 0x8eb87a];
-  // 四片弧形扭转剪纸风车叶片
   for (let i = 0; i < 4; i++) {
-    const bladeGeo = new THREE.ConeGeometry(0.85, 2.3, 4);
+    const bladeGeo = new THREE.ConeGeometry(0.88, 2.35, 4);
     bladeGeo.scale(0.3, 1, 0.85);
     bladeGeo.rotateZ(Math.PI / 2);
     const blade = paperMesh(bladeGeo, bladeColors[i]);
@@ -91,120 +318,113 @@ function pinwheel(colors: TrackColors): PropParts {
     blade.rotation.x = Math.PI / 2.3;
     spinner.add(blade);
   }
-  //  central paper rivet (纸铆钉)
-  const hub = paperMesh(new THREE.CylinderGeometry(0.32, 0.32, 0.15, 8), 0xfdfaf0);
+  const hub = paperMesh(new THREE.CylinderGeometry(0.34, 0.34, 0.16, 10), 0xfdfaf0);
   hub.rotation.x = Math.PI / 2;
   spinner.add(hub);
+
   spinner.position.y = 4.5;
   top.add(spinner);
+
   return { body, top, spinner };
 }
 
-function flower(colors: TrackColors): PropParts {
+function flower(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
 
-  // 底部纸条铰链
   body.add(createVFoldTab(0.7, 0.9, 0xc8dba8));
 
-  // 纤细折纸花茎
-  const stem = paperMesh(new THREE.CylinderGeometry(0.09, 0.13, 2.4, 6), 0x5e9258);
-  stem.position.y = 1.2;
+  const stem = paperMesh(new THREE.CylinderGeometry(0.09, 0.13, 2.3, 6), 0x5e9258);
+  stem.position.y = 1.15;
   body.add(stem);
 
-  // 茎部两侧向外展开的折纸嫩叶
   for (const s of [-1, 1]) {
     const leafGeo = new THREE.ConeGeometry(0.32, 1.1, 4);
     leafGeo.scale(0.45, 1, 0.18);
     const leaf = paperMesh(leafGeo, 0x76ab70);
-    leaf.position.set(s * 0.42, 1.2, 0);
+    leaf.position.set(s * 0.42, 1.15, 0);
     leaf.rotation.z = -s * 0.85;
     body.add(leaf);
   }
 
-  // 2.5D 精美冲压花瓣卡纸立盘（朝向迎向天空与镜头）
-  const flowerHead = new THREE.Group();
-  flowerHead.position.set(0, 2.45, 0);
-  flowerHead.rotation.x = -0.42; // 微仰角面向摄像机
+  // 8 瓣手绘白边厚卡纸花朵
+  const petalPalette = [0xf4a6b8, 0xfff0a6, 0x9fd4ea, 0xffb38a];
+  const petalHex = petalPalette[Math.floor(Math.random() * petalPalette.length)];
+  const headMesh = new THREE.Mesh(getDieCutFlowerGeo(), getDieCutFlowerMaterials(petalHex));
+  headMesh.position.set(0, 2.55, 0);
+  headMesh.rotation.x = -0.32;
+  headMesh.castShadow = true;
+  headMesh.receiveShadow = true;
+  top.add(headMesh);
 
-  // 十二瓣立体冲压白卡纸花朵
-  const petalPalette = [0xfefcf6, 0xfff7d6, 0xffeef4, 0xe8f7ee];
-  const petalColor = petalPalette[Math.floor(Math.random() * petalPalette.length)];
-  const flowerDiscGeo = new THREE.CylinderGeometry(1.35, 1.35, 0.05, 12);
-  flowerDiscGeo.scale(1, 1, 0.85);
-  const flowerDisc = paperMesh(flowerDiscGeo, petalColor);
-  flowerDisc.rotation.x = Math.PI / 2;
-  flowerHead.add(flowerDisc);
-
-  // 凸起的亮黄色点阵纸花蕊
-  const centerGeo = new THREE.CylinderGeometry(0.52, 0.52, 0.12, 10);
-  const center = paperMesh(centerGeo, 0xffb732);
-  center.rotation.x = Math.PI / 2;
-  center.position.z = 0.04;
-  flowerHead.add(center);
-
-  top.add(flowerHead);
   return { body, top };
 }
 
 // ---------- 夜巷 ----------
-function lanternTower(colors: TrackColors): PropParts {
+function lanternTower(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
 
-  // 底部纸条铰链
   body.add(createVFoldTab(0.9, 1.2, 0x242e44));
 
   const pole = paperMesh(new THREE.CylinderGeometry(0.2, 0.26, 5.2, 6), 0x2b3752);
   pole.position.y = 2.6;
   body.add(pole);
+
   const lanternMat = createEmissivePaper(0xffb347, 0xffa028, 1.6);
   const lantern = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 1.7, 8), lanternMat);
   attachOrigamiEdges(lantern, 20);
   lantern.position.y = 5.4;
   top.add(lantern);
+
   const cap = paperMesh(new THREE.ConeGeometry(1.3, 0.7, 8), 0x3b2f27);
   cap.position.y = 6.5;
   top.add(cap);
+
   const tassel = paperMesh(new THREE.CylinderGeometry(0.08, 0.08, 0.8, 4), 0xe07a5f);
   tassel.position.y = 4.3;
   top.add(tassel);
+
   return { body, top };
 }
 
-function nightEave(colors: TrackColors): PropParts {
+function nightEave(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
 
-  // 底部纸条铰链
   body.add(createVFoldTab(1.6, 1.4, 0x1f273b));
 
   const wall = paperMesh(new THREE.BoxGeometry(3.4, 3.2, 2.6), 0x2b3752);
   wall.position.y = 1.6;
   body.add(wall);
+
   const win = new THREE.Mesh(
     new THREE.PlaneGeometry(1.2, 1.0),
     createEmissivePaper(0xffd166, 0xffc94d, 1.3)
   );
   win.position.set(0, 1.8, 1.32);
   body.add(win);
+
   const roof = paperMesh(new THREE.ConeGeometry(3.0, 1.5, 4), 0x1b2438);
   roof.rotation.y = Math.PI / 4;
   roof.position.y = 3.9;
   roof.scale.set(1.2, 1, 0.9);
   top.add(roof);
+
   const trim = new THREE.Mesh(
     new THREE.BoxGeometry(4.4, 0.16, 3.2),
     createEmissivePaper(0xe07a5f, 0xe07a5f, 0.7)
   );
   trim.position.y = 3.25;
   top.add(trim);
+
   return { body, top };
 }
 
-function origamiCrane(colors: TrackColors): PropParts {
+function origamiCrane(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
+
   const post = paperMesh(new THREE.CylinderGeometry(0.12, 0.16, 3.8, 5), 0x2b3752);
   post.position.y = 1.9;
   body.add(post);
@@ -213,6 +433,7 @@ function origamiCrane(colors: TrackColors): PropParts {
   const craneBody = paperMesh(new THREE.ConeGeometry(0.55, 1.4, 4), 0xfffdf8, { threshold: 10 });
   craneBody.rotation.x = Math.PI / 2;
   crane.add(craneBody);
+
   for (const s of [-1, 1]) {
     const wing = paperMesh(new THREE.ConeGeometry(0.6, 1.8, 3), 0xffe066, { threshold: 8 });
     wing.position.set(s * 0.9, 0.3, 0);
@@ -220,6 +441,7 @@ function origamiCrane(colors: TrackColors): PropParts {
     wing.rotation.y = Math.PI / 2;
     crane.add(wing);
   }
+
   const neck = paperMesh(new THREE.CylinderGeometry(0.1, 0.15, 0.8, 4), 0xe07a5f);
   neck.position.set(0, 0.6, 0.6);
   neck.rotation.x = -0.6;
@@ -227,16 +449,19 @@ function origamiCrane(colors: TrackColors): PropParts {
 
   crane.position.y = 4.2;
   top.add(crane);
+
   return { body, top };
 }
 
 // ---------- 冰霜 ----------
-function iceCrystal(colors: TrackColors): PropParts {
+function iceCrystal(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
+
   const mound = paperMesh(new THREE.ConeGeometry(1.8, 0.9, 7), 0xeaf6fb);
   mound.position.y = 0.45;
   body.add(mound);
+
   const iceMat = createTranslucentPaper(0xbfe3f2, 0.62, 0x9fd4ea, 0.25);
   for (let i = 0; i < 4; i++) {
     const h = 2.4 + Math.random() * 2.4;
@@ -248,75 +473,93 @@ function iceCrystal(colors: TrackColors): PropParts {
     crystal.rotation.x = (Math.random() - 0.5) * 0.3;
     top.add(crystal);
   }
+
   return { body, top };
 }
 
-function envelopeRidge(colors: TrackColors): PropParts {
+function envelopeRidge(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
+
   const env = paperMesh(new THREE.BoxGeometry(3.2, 2.2, 0.5), 0xf4f9fc);
   env.position.y = 1.1;
   body.add(env);
+
   const flap = paperMesh(new THREE.ConeGeometry(2.2, 1.4, 3), 0xdfeaf2, { threshold: 10 });
   flap.rotation.x = Math.PI;
   flap.rotation.z = Math.PI / 2;
   flap.position.y = 2.4;
   flap.scale.set(1, 1, 0.3);
   top.add(flap);
+
   const seal = paperMesh(new THREE.CylinderGeometry(0.4, 0.4, 0.12, 8), 0x4b8ab0);
   seal.rotation.x = Math.PI / 2;
   seal.position.set(0, 1.4, 0.3);
   top.add(seal);
+
   return { body, top };
 }
 
-// ---------- 书桌 ----------
-function stickyNote(colors: TrackColors): PropParts {
+// ---------- 书桌（便利贴升级带横线手账纹理与粉色胶带） ----------
+function stickyNote(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
+
   const base = paperMesh(new THREE.BoxGeometry(1.6, 0.3, 1.6), 0xb08154);
   base.position.y = 0.15;
   body.add(base);
-  const noteColors = [0xf4d35e, 0xf4a6b8, 0x9fd4ea, 0xb5e0a8, 0xffb347];
-  const c = noteColors[Math.floor(Math.random() * noteColors.length)];
-  const note = paperMesh(new THREE.BoxGeometry(2.4, 2.6, 0.12), c);
+
+  const noteMat = createTexturedPaperMaterial(getStickyNoteTexture());
+  const note = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.6, 0.12), noteMat);
   note.position.y = 1.6;
   note.rotation.x = -0.12;
+  note.castShadow = true;
+  note.receiveShadow = true;
   top.add(note);
-  const curl = paperMesh(new THREE.BoxGeometry(2.4, 0.5, 0.12), c);
+
+  const curl = paperMesh(new THREE.BoxGeometry(2.4, 0.5, 0.12), 0xfff5b8);
   curl.position.set(0, 0.45, 0.22);
   curl.rotation.x = 0.6;
   top.add(curl);
+
   return { body, top };
 }
 
-function pencil(colors: TrackColors): PropParts {
+function pencil(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
+
   const shaft = paperMesh(new THREE.CylinderGeometry(0.5, 0.5, 5.0, 6), 0xf4d35e);
   shaft.position.y = 2.5;
   body.add(shaft);
+
   const wood = paperMesh(new THREE.ConeGeometry(0.5, 1.1, 6), 0xe8c9a0);
   wood.position.y = 5.5;
   top.add(wood);
+
   const lead = paperMesh(new THREE.ConeGeometry(0.18, 0.4, 6), 0x3b2f27);
   lead.position.y = 6.15;
   top.add(lead);
+
   const eraser = paperMesh(new THREE.CylinderGeometry(0.5, 0.5, 0.6, 6), 0xf4a6b8);
   eraser.position.y = 0.3;
   body.add(eraser);
+
   return { body, top };
 }
 
-function eraser(colors: TrackColors): PropParts {
+function eraser(_colors: TrackColors): PropParts {
   const body = new THREE.Group();
   const top = new THREE.Group();
+
   const block = paperMesh(new THREE.BoxGeometry(2.6, 1.4, 1.4), 0xf4a6b8);
   block.position.y = 0.7;
   body.add(block);
+
   const sleeve = paperMesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), 0x4b8ab0);
   sleeve.position.y = 0.75;
   top.add(sleeve);
+
   return { body, top };
 }
 
@@ -378,17 +621,16 @@ export function updatePopupProps(
       const sTop = Math.max(0.01, easeOutBack(tTop));
       prop.topGroup.scale.set(sTop, sTop, sTop);
     } else if (prop.popped) {
-      // 展开后轻微纸艺摆动
       prop.swayPhase += dt;
-      prop.bodyGroup.rotation.z = Math.sin(prop.swayPhase * 1.3) * 0.02;
+      prop.bodyGroup.rotation.z = Math.sin(prop.swayPhase * 1.3) * 0.025;
     }
+
     if (prop.popped && prop.spinner) {
       prop.spinner.rotation.z += dt * 2.2;
     }
   }
 }
 
-/** 大厅预览：立即全部展开 */
 export function popAllInstant(props: PopupPropRig[]): void {
   for (const p of props) {
     p.popped = true;
@@ -399,9 +641,7 @@ export function popAllInstant(props: PopupPropRig[]): void {
 }
 
 // ---------- 路边连续地饰几何工厂（栅栏 / 灌木 / 纸花，供 TrackBuilder 批量合并） ----------
-
 let fenceGeos: THREE.BufferGeometry[] | null = null;
-/** 一段 2.6 宽折纸小栅栏（双立柱 + 双横杆），局部 X 沿栅栏走向 */
 export function getFenceSectionGeos(): THREE.BufferGeometry[] {
   if (!fenceGeos) {
     const post = new THREE.BoxGeometry(0.16, 0.95, 0.16);
@@ -418,7 +658,6 @@ export function getFenceSectionGeos(): THREE.BufferGeometry[] {
 }
 
 let bushGeo: THREE.BufferGeometry | null = null;
-/** 低矮折纸灌木团（压扁二十面体） */
 export function getBushGeo(): THREE.BufferGeometry {
   if (!bushGeo) {
     bushGeo = new THREE.IcosahedronGeometry(0.85, 0);
@@ -429,7 +668,6 @@ export function getBushGeo(): THREE.BufferGeometry {
 }
 
 let flowerGeos: { stem: THREE.BufferGeometry; head: THREE.BufferGeometry } | null = null;
-/** 单支小纸花（茎 + 五棱锥花头） */
 export function getFlowerGeos(): { stem: THREE.BufferGeometry; head: THREE.BufferGeometry } {
   if (!flowerGeos) {
     const stem = new THREE.CylinderGeometry(0.045, 0.06, 0.55, 5);

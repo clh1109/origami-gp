@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TrackSpec, PopupPropRig, ItemBoxEntity, BoostPadEntity } from '../types/game';
-import { createPaperMaterial, createEmissivePaper, paperMesh, attachOrigamiEdges } from '../materials/PaperMaterial';
+import { createPaperMaterial, createEmissivePaper, paperMesh, attachOrigamiEdges, ensureBoxUV } from '../materials/PaperMaterial';
 import { getChecker, getPaperFiberBump } from '../materials/PaperTextures';
 import { buildPopupProp, getFenceSectionGeos, getBushGeo, getFlowerGeos } from '../models/PopupPropBuilder';
 
@@ -178,6 +178,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     dashGeo.setAttribute('position', new THREE.Float32BufferAttribute(dashPos, 3));
     dashGeo.setIndex(dashIdx);
     dashGeo.computeVertexNormals();
+    ensureBoxUV(dashGeo, 0.35);
     const dashMat = new THREE.MeshStandardMaterial({
       color: 0xfffdf8,
       roughness: 0.92,
@@ -185,6 +186,9 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
       flatShading: true,
       bumpMap: getPaperFiberBump(),
       bumpScale: 0.03,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
     const dashes = new THREE.Mesh(dashGeo, dashMat);
     dashes.receiveShadow = true;
@@ -222,6 +226,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
   curbGeo.setAttribute('color', new THREE.Float32BufferAttribute(curbCol, 3));
   curbGeo.setIndex(curbIdx);
   curbGeo.computeVertexNormals();
+  ensureBoxUV(curbGeo, 0.35);
   const curbMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.9,
@@ -229,11 +234,59 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     flatShading: true,
     bumpMap: getPaperFiberBump(),
     bumpScale: 0.04,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
   });
   const curbs = new THREE.Mesh(curbGeo, curbMat);
   curbs.receiveShadow = true;
   curbs.castShadow = false;
   group.add(curbs);
+
+  // ---------- 手工和纸胶带贴片 (Washi Tape Seams) ----------
+  {
+    const tapeCanvas = document.createElement('canvas');
+    tapeCanvas.width = 64;
+    tapeCanvas.height = 64;
+    const tctx = tapeCanvas.getContext('2d')!;
+    tctx.fillStyle = '#fff8eb';
+    tctx.fillRect(0, 0, 64, 64);
+    tctx.strokeStyle = 'rgba(224, 90, 71, 0.45)';
+    tctx.lineWidth = 8;
+    for (let k = -64; k < 128; k += 20) {
+      tctx.beginPath();
+      tctx.moveTo(k, 0);
+      tctx.lineTo(k + 64, 64);
+      tctx.stroke();
+    }
+    const tapeTex = new THREE.CanvasTexture(tapeCanvas);
+    tapeTex.colorSpace = THREE.SRGBColorSpace;
+    const tapeMat = new THREE.MeshStandardMaterial({
+      map: tapeTex,
+      transparent: true,
+      opacity: 0.78,
+      roughness: 0.9,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
+    });
+    const tapeGeo = new THREE.PlaneGeometry(2.6, 1.05);
+    tapeGeo.rotateX(-Math.PI / 2);
+
+    for (let i = 12; i < ROAD_SAMPLES; i += 22) {
+      const p = samples[i];
+      if (p.y > 0.8) continue;
+      const n = normalAt(i);
+      const tg = tangents[i];
+      const side = (i / 22) % 2 === 0 ? 1 : -1;
+      const pos = p.clone().addScaledVector(n, side * (half + curbW * 0.65));
+      const tape = new THREE.Mesh(tapeGeo, tapeMat);
+      tape.position.set(pos.x, p.y + 0.14, pos.z);
+      tape.rotation.y = Math.atan2(tg.x, tg.z) + (side * 0.32);
+      tape.receiveShadow = true;
+      group.add(tape);
+    }
+  }
 
   // ---------- 卡纸厚度裙边：路肩外沿垂直向下 1.4，高架段像有厚度的折纸带 ----------
   const skirtPos: number[] = [];
