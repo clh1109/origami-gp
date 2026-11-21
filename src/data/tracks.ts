@@ -1,20 +1,19 @@
 import type { TrackSpec } from '../types/game';
 
-/** 4 条原创赛道，Hex 配色锁死（道路与草地对比鲜明） */
-/** 4 条原创赛道 (1:1 对标原视频第 1 关雏菊草甸与黄昏暮色小镇) */
+/** 4 条原创赛道（高对比明快绘本配色） */
 export const TRACKS: TrackSpec[] = [
   {
     id: 'meadow',
     name: '雏菊草甸',
-    subtitle: '春日清晨，风车与溪流',
+    subtitle: '春日清晨, 风车与溪流',
     theme: 'meadow',
     colors: {
-      sky: 0xebe6d6,
-      ground: 0x98b87c,
-      road: 0xfdfbf3,
-      curbA: 0xde4e3f,
-      curbB: 0xfffdf6,
-      mountain: 0x7fae76,
+      sky: 0xbce6ff,
+      ground: 0x8fd16a,
+      road: 0xc2a887,
+      curbA: 0xe85242,
+      curbB: 0xfffcf5,
+      mountain: 0x7ec99b,
     },
     points: [
       [0, 0, -70],
@@ -32,21 +31,21 @@ export const TRACKS: TrackSpec[] = [
     laps: 3,
     boostT: [0.12, 0.46, 0.78],
     itemT: [0.3, 0.62, 0.9],
-    fogNear: 150,
-    fogFar: 470,
+    fogNear: 170,
+    fogFar: 520,
   },
   {
     id: 'twilight',
     name: '暮色纸镇',
-    subtitle: '晚霞微醺，夕阳与星空',
+    subtitle: '晚霞微醺, 夕阳与星空',
     theme: 'neon',
     colors: {
-      sky: 0x384860,
-      ground: 0x242e40,
-      road: 0x445068,
+      sky: 0x2c3b63,
+      ground: 0x242e44,
+      road: 0x525e7a,
       curbA: 0xe05a47,
       curbB: 0xfffdf8,
-      mountain: 0x2a364a,
+      mountain: 0x384870,
     },
     points: [
       [0, 0, -60],
@@ -66,8 +65,8 @@ export const TRACKS: TrackSpec[] = [
     laps: 3,
     boostT: [0.2, 0.55, 0.85],
     itemT: [0.36, 0.7, 0.95],
-    fogNear: 100,
-    fogFar: 360,
+    fogNear: 110,
+    fogFar: 380,
   },
   {
     id: 'frost',
@@ -75,11 +74,11 @@ export const TRACKS: TrackSpec[] = [
     subtitle: '第三章 · 水彩纸的寒冬',
     theme: 'frost',
     colors: {
-      sky: 0xd6ebf5,
-      ground: 0xa9d0e5,
-      road: 0xffffff,
+      sky: 0xc8ebff,
+      ground: 0xbde2f5,
+      road: 0x8eaec4,
       curbA: 0x4b8ab0,
-      curbB: 0xd8f3dc,
+      curbB: 0xf7fcff,
       mountain: 0x8bbbd6,
     },
     points: [
@@ -100,8 +99,8 @@ export const TRACKS: TrackSpec[] = [
     laps: 3,
     boostT: [0.16, 0.5, 0.82],
     itemT: [0.32, 0.66, 0.92],
-    fogNear: 140,
-    fogFar: 450,
+    fogNear: 160,
+    fogFar: 480,
   },
   {
     id: 'desk',
@@ -109,9 +108,9 @@ export const TRACKS: TrackSpec[] = [
     subtitle: '第四章 · 牛皮纸的午后',
     theme: 'desk',
     colors: {
-      sky: 0xf4e3cc,
-      ground: 0xc79a6b,
-      road: 0xfcf8ef,
+      sky: 0xf7e7ce,
+      ground: 0xd1a777,
+      road: 0x9c8268,
       curbA: 0xc86d51,
       curbB: 0xf4d35e,
       mountain: 0xb08154,
@@ -134,11 +133,15 @@ export const TRACKS: TrackSpec[] = [
     laps: 3,
     boostT: [0.14, 0.48, 0.8],
     itemT: [0.3, 0.64, 0.9],
-    fogNear: 140,
-    fogFar: 450,
+    fogNear: 160,
+    fogFar: 480,
   },
 ];
 
 export function getTrack(id: string): TrackSpec {
-  return TRACKS.find((t) => t.id === id || (id === 'nightmarket' && t.id === 'twilight') || (id === 'neon' && t.id === 'twilight')) ?? TRACKS[0];
+  return (
+    TRACKS.find(
+      (t) => t.id === id || (id === 'nightmarket' && t.id === 'twilight') || (id === 'neon' && t.id === 'twilight')
+    ) ?? TRACKS[0]
+  );
 }

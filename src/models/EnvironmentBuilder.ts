@@ -24,10 +24,10 @@ function buildLayeredWaveMountains(
 ): THREE.Group {
   const mountainGroup = new THREE.Group();
   const layerConfigs = [
-    { radiusOffset: 70, baseHeight: 16, freq: 3.5, amp: 5.5, colorLerp: 0.05, ring: 0 },
-    { radiusOffset: 110, baseHeight: 26, freq: 4.5, amp: 8.5, colorLerp: 0.22, ring: 1 },
-    { radiusOffset: 155, baseHeight: 40, freq: 3.0, amp: 12.0, colorLerp: 0.42, ring: 2 },
-    { radiusOffset: 205, baseHeight: 56, freq: 2.2, amp: 16.0, colorLerp: 0.65, ring: 3 },
+    { radiusOffset: 85, baseHeight: 8, freq: 4, amp: 3.0, colorLerp: 0.18, ring: 0 },
+    { radiusOffset: 130, baseHeight: 13, freq: 5, amp: 4.5, colorLerp: 0.38, ring: 1 },
+    { radiusOffset: 180, baseHeight: 19, freq: 3, amp: 6.0, colorLerp: 0.58, ring: 2 },
+    { radiusOffset: 235, baseHeight: 26, freq: 2, amp: 8.0, colorLerp: 0.78, ring: 3 },
   ];
 
   const SEGMENTS = 96;
@@ -53,7 +53,7 @@ function buildLayeredWaveMountains(
       const sinA = Math.sin(a);
       const wave =
         Math.sin(a * cfg.freq + cfg.ring * 1.2) * cfg.amp +
-        Math.cos(a * (cfg.freq * 2.2) + cfg.ring * 0.8) * (cfg.amp * 0.35);
+        Math.cos(a * (cfg.freq * 2) + cfg.ring * 0.8) * (cfg.amp * 0.35);
       const h = Math.max(4, cfg.baseHeight + wave);
       const x = center.x + cosA * r;
       const z = center.z + sinA * r;
@@ -362,6 +362,30 @@ export function buildEnvironment(
   const spanX = bounds.maxX - bounds.minX;
   const spanZ = bounds.maxZ - bounds.minZ;
   const baseR = Math.max(spanX, spanZ) * 0.5;
+
+  // 渐变天空穹顶（打破单调纯色背景）
+  const skyGeo = new THREE.SphereGeometry(520, 24, 16);
+  const posAttr = skyGeo.attributes.position;
+  const skyCols = new Float32Array(posAttr.count * 3);
+  const cTop = new THREE.Color(night ? 0x161f3b : 0x5eb8f2);
+  const cMid = new THREE.Color(spec.colors.sky);
+  const cBot = new THREE.Color(night ? 0x2e3c62 : 0xfff8eb);
+  const tmpC = new THREE.Color();
+  for (let i = 0; i < posAttr.count; i++) {
+    const yn = THREE.MathUtils.clamp(posAttr.getY(i) / 520, 0, 1);
+    if (yn < 0.22) tmpC.copy(cBot).lerp(cMid, yn / 0.22);
+    else tmpC.copy(cMid).lerp(cTop, Math.pow((yn - 0.22) / 0.78, 0.7));
+    skyCols[i * 3] = tmpC.r;
+    skyCols[i * 3 + 1] = tmpC.g;
+    skyCols[i * 3 + 2] = tmpC.b;
+  }
+  skyGeo.setAttribute('color', new THREE.BufferAttribute(skyCols, 3));
+  const skyDome = new THREE.Mesh(
+    skyGeo,
+    new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })
+  );
+  skyDome.position.set(center.x, 0, center.z);
+  group.add(skyDome);
 
   const mountains = buildLayeredWaveMountains(
     center,

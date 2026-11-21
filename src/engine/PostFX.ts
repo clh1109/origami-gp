@@ -3,12 +3,10 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 /**
- * 微缩模型质感后处理：
- * - 移轴景深（tilt-shift）：焦平面外上下渐晕模糊，营造"微缩纸艺沙盘"观感
- * - 轻量泛光：仅让自发光纸灯笼 / 加速带溢出柔光
- * - 暖调饱和调色：消除灰白塑料感
+ * 清透绘本后处理：
+ * - 非对称移轴景深：只轻柔虚化屏幕顶部的远景天际，绝不模糊下方主角赛车
+ * - 清透暖调微饱和：保持蓝天与嫩绿草地的通透感
  */
-
 const TiltShiftShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -16,10 +14,10 @@ const TiltShiftShader = {
     direction: { value: new THREE.Vector2(1, 0) },
     focusY: { value: 0.55 },
     band: { value: 0.22 },
-    maxBlur: { value: 2.8 },
-    grade: { value: 0 }, // 1 时在竖向 pass 做调色
-    saturation: { value: 1.18 },
-    warmth: { value: 0.045 },
+    maxBlur: { value: 1.5 },
+    grade: { value: 0 },
+    saturation: { value: 1.14 },
+    warmth: { value: 0.012 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -41,8 +39,9 @@ const TiltShiftShader = {
     varying vec2 vUv;
 
     void main() {
-      float d = abs(vUv.y - focusY);
-      float blur = smoothstep(band, band + 0.38, d) * maxBlur;
+      // 只对屏幕上方远景做轻柔景深虚化，主角车所在的中下半屏保持 100% 清晰
+      float topDist = max(0.0, vUv.y - (focusY + 0.14));
+      float blur = smoothstep(0.0, 0.34, topDist) * maxBlur;
       vec2 px = direction / resolution * blur;
       vec4 c = texture2D(tDiffuse, vUv) * 0.227027;
       c += texture2D(tDiffuse, vUv + px * 1.3846) * 0.3162162;
@@ -53,11 +52,10 @@ const TiltShiftShader = {
       if (grade > 0.5) {
         float l = dot(col, vec3(0.299, 0.587, 0.114));
         col = mix(vec3(l), col, saturation);
-        col += vec3(warmth, warmth * 0.45, -warmth * 0.5) * (0.35 + 0.65 * l);
-        // 微距暗角（Vignette）：边缘产生柔和的摄影微距暗部过渡
-        vec2 vigUv = (vUv - 0.5) * 1.85;
-        float vig = 1.0 - dot(vigUv, vigUv) * 0.14;
-        col *= clamp(vig, 0.82, 1.0);
+        col += vec3(warmth, warmth * 0.5, -warmth * 0.35) * (0.35 + 0.65 * l);
+        vec2 vigUv = (vUv - 0.5) * 1.75;
+        float vig = 1.0 - dot(vigUv, vigUv) * 0.08;
+        col *= clamp(vig, 0.88, 1.0);
         col = clamp(col, 0.0, 1.0);
       }
       gl_FragColor = vec4(col, c.a);
@@ -73,8 +71,7 @@ export function makeTiltShiftPass(horizontal: boolean, withGrade: boolean): Shad
 }
 
 export function makeBloomPass(width: number, height: number): UnrealBloomPass {
-  const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), 0.28, 0.7, 0.82);
-  return bloom;
+  return new UnrealBloomPass(new THREE.Vector2(width, height), 0.22, 0.35, 0.95);
 }
 
 export function setTiltResolution(passes: ShaderPass[], width: number, height: number): void {

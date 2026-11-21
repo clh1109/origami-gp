@@ -229,30 +229,40 @@ export function getCorrugated(base = '#d9b382'): THREE.Texture {
   });
 }
 
-/** 水彩纸（柔和晕染斑点） */
+/** 水彩拼布纸（柔和条纹草坪 + 水彩晕染 + 冷压纸纹） */
 export function getWatercolor(base = '#ffffff'): THREE.Texture {
   return cached(`wc-${base}`, () => {
     const size = 256;
     const { canvas, ctx } = createCanvas(size);
     ctx.fillStyle = base;
     ctx.fillRect(0, 0, size, size);
+
+    // 柔和的手工剪纸条纹草坪（双色明暗交替）
+    ctx.fillStyle = 'rgba(255, 255, 235, 0.12)';
+    for (let x = 0; x < size; x += 64) {
+      ctx.fillRect(x, 0, 32, size);
+    }
+    ctx.fillStyle = 'rgba(40, 85, 35, 0.06)';
+    for (let y = 0; y < size; y += 64) {
+      ctx.fillRect(0, y, size, 32);
+    }
+
     const rnd = mulberry(99);
     for (let i = 0; i < 60; i++) {
       const x = rnd() * size;
       const y = rnd() * size;
-      const r = 8 + rnd() * 40;
+      const r = 10 + rnd() * 44;
       const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      const tone = rnd() > 0.5 ? '210,225,235' : '235,225,205';
-      g.addColorStop(0, `rgba(${tone},${rnd() * 0.10})`);
+      const tone = rnd() > 0.5 ? '255,252,228' : '195,230,175';
+      g.addColorStop(0, `rgba(${tone},${rnd() * 0.14})`);
       g.addColorStop(1, `rgba(${tone},0)`);
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     }
-    // 冷压颗粒
-    for (let i = 0; i < 3000; i++) {
-      ctx.fillStyle = `rgba(120,120,120,${rnd() * 0.05})`;
+    for (let i = 0; i < 2800; i++) {
+      ctx.fillStyle = `rgba(90,95,80,${rnd() * 0.05})`;
       ctx.fillRect(rnd() * size, rnd() * size, 1, 1);
     }
     return toTexture(canvas, true, 1);
