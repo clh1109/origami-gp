@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { useGameStore } from './store/gameStore';
 import LobbyOverlay from './ui/LobbyOverlay';
-import { StoryBookIntro } from './ui/StoryBookIntro';
 import RaceHUD from './ui/RaceHUD';
 import TouchControls from './ui/TouchControls';
 import Modals from './ui/Modals';
@@ -35,6 +34,7 @@ export default function App() {
         onHud: (h) => useGameStore.getState().setHud(h),
         onPhase: (p) => useGameStore.getState().setPhase(p),
         onResults: (r) => useGameStore.getState().setResults(r),
+        onBookIntroDone: () => useGameStore.getState().setBookCover(false),
       };
       engine.applySettings(st.settings);
       engine.enterLobby(st.config, st.lobbyStep);
@@ -73,6 +73,15 @@ export default function App() {
     if (!e || phase !== 'lobby') return;
     e.setLobbyStep(lobbyStep);
   }, [lobbyStep, phase]);
+
+  // 重温 3D 绘本开场
+  useEffect(() => {
+    const e = engineRef.current;
+    if (!e || phase !== 'lobby') return;
+    if (bookCover) {
+      e.startBookIntro();
+    }
+  }, [bookCover, phase]);
 
   // 设置 → 引擎
   useEffect(() => {
@@ -127,7 +136,30 @@ export default function App() {
         </div>
       )}
       {phase === 'lobby' && !initError && bookCover && (
-        <StoryBookIntro onOpenBook={() => setBookCover(false)} />
+        <div className="pointer-events-none fixed inset-0 z-30 flex flex-col justify-between p-6 sm:p-8 select-none">
+          <div className="flex justify-between items-start pointer-events-auto">
+            <div className="paper-card origami-border rounded-full px-4 py-1.5 text-xs font-bold text-ink/80 bg-white/85 shadow-sm">
+              📖 3D 奇幻立体绘本
+            </div>
+            <button
+              onClick={() => {
+                engineRef.current?.skipBookIntro();
+                setBookCover(false);
+              }}
+              className="btn-press paper-card origami-border rounded-full px-4 py-1.5 text-xs font-bold text-ink/80 bg-white/85 shadow-sm hover:bg-white"
+            >
+              跳过开场 ⏩
+            </button>
+          </div>
+          <div className="flex flex-col items-center text-center animate-fade-up pb-3">
+            <div className="font-hand text-base sm:text-lg font-bold text-[#fffdf6] drop-shadow-[0_2px_10px_rgba(35,24,14,0.85)] tracking-widest">
+              午后三点，书页悄悄打开，奇幻折纸世界正在苏醒……
+            </div>
+            <div className="mt-1 text-xs text-[#fffdf6]/80 drop-shadow-[0_1px_4px_rgba(35,24,14,0.8)] tracking-wider">
+              ✦ 纯 3D 实时折纸演算 · 涟漪依次弹起 ✦
+            </div>
+          </div>
+        </div>
       )}
       {phase === 'lobby' && !initError && !bookCover && (
         <LobbyOverlay onStart={onStart} />

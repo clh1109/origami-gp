@@ -43,12 +43,34 @@ page.on('pageerror', (e) => errors.push('[pageerror] ' + e.message));
 console.log('Navigating to single-file build:', fileUrl);
 await page.goto(fileUrl, { waitUntil: 'load', timeout: 30000 });
 await page.waitForSelector('canvas', { timeout: 15000 });
-await wait(3000);
 
-// 0. 验证开场精装立体书封面
-await page.screenshot({ path: 'shots/v5-storybook-cover.png' });
-await page.evaluate(() => window.__store.getState().setBookCover(false));
-await wait(500);
+// 0a. 阶段 1：3D 精装绘本合于书桌上，金色微尘飘动 (初始状态)
+await wait(200);
+await page.screenshot({ path: 'shots/v10-3d-book-closed.png' });
+
+// 0b. 阶段 2：3D 书面缓缓自动翻开 (翻开至半立状态)
+await page.evaluate(() => {
+  const e = window.__engine;
+  for (let i = 0; i < 35; i++) e.update(0.016);
+});
+await page.screenshot({ path: 'shots/v10-3d-book-turning.png' });
+
+// 0c. 阶段 3：赛道浮起，92 个立体书景物按涟漪顺序依次弹起
+await page.evaluate(() => {
+  const e = window.__engine;
+  for (let i = 0; i < 50; i++) e.update(0.016);
+});
+await page.screenshot({ path: 'shots/v10-3d-book-popping.png' });
+
+// 0d. 阶段 4：运镜俯冲到底，完成翻书并无缝进入大厅展示台 (步进到 t ~ 5.3s)
+await page.evaluate(() => {
+  const e = window.__engine;
+  for (let i = 0; i < 140; i++) e.update(0.016);
+  if (e.isIntroPlaying) e.skipBookIntro();
+  window.__store?.getState().setBookCover(false);
+});
+await wait(600);
+await page.screenshot({ path: 'shots/v10-3d-book-hero-lobby.png' });
 
 // 1. 验证大厅 Step 1 (模式)
 await page.screenshot({ path: 'shots/v5-lobby-step1.png' });

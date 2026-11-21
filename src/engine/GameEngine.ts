@@ -7,6 +7,7 @@ import { buildTrack, type TrackBuildResult, type TrackQueryResult } from '../tra
 import { buildEnvironment, buildGround, updateClouds, type EnvironmentResult } from '../models/EnvironmentBuilder';
 import { updatePopupProps, popAllInstant } from '../models/PopupPropBuilder';
 import { buildCar } from '../models/CarBuilder';
+import { BookIntroCinematic } from '../models/BookIntroCinematic';
 import { stepCarPhysics, resolveCarCollisions, computeOffroad } from '../gameplay/PhysicsSystem';
 import { computeAIInput } from '../gameplay/AIController';
 import { GhostRecorder, GhostPlayer, loadBestGhost, saveBestGhost } from '../gameplay/GhostRecorder';
@@ -29,6 +30,7 @@ export interface EngineEvents {
   onHud?: (h: HudSnapshot) => void;
   onPhase?: (p: GamePhase) => void;
   onResults?: (r: RacerResult[]) => void;
+  onBookIntroDone?: () => void;
 }
 
 const ITEM_POOL: ItemType[] = ['shield', 'boost', 'trap', 'boomerang'];
@@ -65,6 +67,8 @@ export class GameEngine {
 
   private pedestal: THREE.Group | null = null;
   private showcaseCar: CarRuntimeState | null = null;
+  private bookIntro: BookIntroCinematic | null = null;
+  hasPlayedIntro = false;
 
   private time = 0;
   private raceTime = 0;
@@ -241,7 +245,6 @@ export class GameEngine {
     this.lobbyStep = step;
     this.clearCars();
     this.buildWorld(config.trackId);
-    if (this.track) popAllInstant(this.track.props);
     // 展示台 + 展示车
     const center = this.track ? this.track.center : new THREE.Vector3();
     this.pedestal = new THREE.Group();
@@ -263,12 +266,48 @@ export class GameEngine {
     this.pedestal.position.set(center.x, 0, center.z);
     this.sm.scene.add(this.pedestal);
     this.showcaseCar = this.makeCar(config.racerId, config.paperId, false, false, new THREE.Vector3(center.x, 0.7, center.z), 0);
+
+    if (!this.hasPlayedIntro && this.track) {
+      this.hasPlayedIntro = true;
+      this.startBookIntro();
+    } else if (this.track) {
+      popAllInstant(this.track.props);
+    }
     this.rig.reset();
     this.rig.setMode(step === 3 ? 'showcase' : 'lobby');
     this.audio.stopEngine();
     this.audio.stopDrift();
     this.events.onPhase?.('lobby');
     this.pushHud(true);
+  }
+
+  startBookIntro(onDone?: () => void): void {
+    if (!this.track) return;
+    if (this.bookIntro && !this.bookIntro.isFinished) return;
+    this.bookIntro?.dispose();
+    this.bookIntro = new BookIntroCinematic({
+      scene: this.sm.scene,
+      camera: this.sm.camera,
+      center: this.track.center,
+      trackGroup: this.track.group,
+      props: this.track.props,
+      pedestal: this.pedestal,
+      showcaseCar: this.showcaseCar?.root ?? null,
+      onComplete: () => {
+        this.bookIntro = null;
+        this.rig.reset();
+        onDone?.();
+        this.events.onBookIntroDone?.();
+      },
+    });
+  }
+
+  skipBookIntro(): void {
+    this.bookIntro?.finish();
+  }
+
+  get isIntroPlaying(): boolean {
+    return !!(this.bookIntro && !this.bookIntro.isFinished);
   }
 
   setLobbyStep(step: LobbyStep): void {
@@ -287,6 +326,7 @@ export class GameEngine {
 
   // ================= 比赛 =================
   startRace(config: RaceConfig): void {
+    this.bookIntro?.finish();
     this.config = config;
     this.mode = config.mode;
     this.clearCars();
@@ -445,6 +485,11 @@ export class GameEngine {
   private updateLobby(dt: number): void {
     if (!this.track) return;
     const center = this.track.center;
+    if (this.bookIntro && !this.bookIntro.isFinished) {
+      this.bookIntro.update(dt);
+      this.sm.updateShadowFocus(center);
+      return;
+    }
     if (this.showcaseCar) {
       this.showcaseCar.root.rotation.y += dt * 0.6;
       this.showcaseCar.wheelSpin += dt * 2;
@@ -792,6 +837,7 @@ export class GameEngine {
 
   dispose(): void {
     this.disposed = true;
+    this.bookIntro?.dispose();
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.onKeyDown);
