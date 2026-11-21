@@ -5,7 +5,7 @@ import { AudioEngine } from './AudioEngine';
 import { ParticleSystem } from '../gameplay/ParticleSystem';
 import { buildTrack, type TrackBuildResult, type TrackQueryResult } from '../tracks/TrackBuilder';
 import { buildEnvironment, buildGround, updateClouds, type EnvironmentResult } from '../models/EnvironmentBuilder';
-import { updatePopupProps, popAllInstant } from '../models/PopupPropBuilder';
+import { updatePopupProps, popAllInstant, foldAllProps } from '../models/PopupPropBuilder';
 import { buildCar } from '../models/CarBuilder';
 import { BookIntroCinematic } from '../models/BookIntroCinematic';
 import { CraneRescueController } from '../models/CraneRescue';
@@ -355,6 +355,7 @@ export class GameEngine {
     this.clearCars();
     this.buildWorld(config.trackId);
     if (!this.track) return;
+    foldAllProps(this.track.props);
     const track = this.track;
     this.raceTime = 0;
     this.countdown = 3;

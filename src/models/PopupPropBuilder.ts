@@ -595,7 +595,17 @@ export function buildPopupProp(theme: PropTheme, variant: number, colors: TrackC
   };
 }
 
-/** 3 级关节展开控制器（遵循架构时间轴） */
+/** 比赛开始前把全部景物重新折平收纳进书页 */
+export function foldAllProps(props: PopupPropRig[]): void {
+  for (const p of props) {
+    p.popped = false;
+    p.elapsed = 0;
+    p.rootPivot.rotation.x = -Math.PI / 2;
+    p.topGroup.scale.set(0.01, 0.01, 0.01);
+  }
+}
+
+/** 随赛车推进逐渐展开的立体书控制器（前方 68 单位内弹性立起，身后 115 单位外静默折平供下一圈再展开） */
 export function updatePopupProps(
   props: PopupPropRig[],
   playerPos: THREE.Vector3,
@@ -604,20 +614,35 @@ export function updatePopupProps(
 ): void {
   let playedThisFrame = false;
   for (const prop of props) {
-    if (!prop.popped && playerPos.distanceTo(prop.rootPivot.position) < 58) {
+    const dist = playerPos.distanceTo(prop.rootPivot.position);
+
+    // 赛车靠近到 68 单位内：触发逐渐立起
+    if (!prop.popped && dist < 68) {
       prop.popped = true;
+      prop.elapsed = 0;
       if (!playedThisFrame && onPop) {
         onPop();
         playedThisFrame = true;
       }
     }
-    if (prop.popped && prop.elapsed < 0.6) {
-      prop.elapsed = Math.min(0.6, prop.elapsed + dt);
-      const tBase = Math.min(1, prop.elapsed / 0.35);
+
+    // 赛车驶离超过 115 单位（已在镜头后方）：悄悄折平，下一圈经过时再次立体弹起
+    if (prop.popped && dist > 115) {
+      prop.popped = false;
+      prop.elapsed = 0;
+      prop.rootPivot.rotation.x = -Math.PI / 2;
+      prop.topGroup.scale.set(0.01, 0.01, 0.01);
+      continue;
+    }
+
+    if (prop.popped && prop.elapsed < 0.72) {
+      // 柔和的 0.72 秒立体展开曲线（比之前更从容、更有立体书翻立观感）
+      prop.elapsed = Math.min(0.72, prop.elapsed + dt);
+      const tBase = Math.min(1, prop.elapsed / 0.45);
       const eBase = easeOutBack(tBase);
       prop.rootPivot.rotation.x = (-Math.PI / 2) * (1 - eBase);
 
-      const tTop = Math.max(0, Math.min(1, (prop.elapsed - 0.15) / 0.4));
+      const tTop = Math.max(0, Math.min(1, (prop.elapsed - 0.16) / 0.52));
       const sTop = Math.max(0.01, easeOutBack(tTop));
       prop.topGroup.scale.set(sTop, sTop, sTop);
     } else if (prop.popped) {
@@ -634,7 +659,7 @@ export function updatePopupProps(
 export function popAllInstant(props: PopupPropRig[]): void {
   for (const p of props) {
     p.popped = true;
-    p.elapsed = 0.6;
+    p.elapsed = 0.72;
     p.rootPivot.rotation.x = 0;
     p.topGroup.scale.set(1, 1, 1);
   }
