@@ -315,6 +315,10 @@ export class GameEngine {
     });
   }
 
+  openBookIntro(): void {
+    this.bookIntro?.triggerOpen();
+  }
+
   skipBookIntro(): void {
     this.bookIntro?.finish();
   }
