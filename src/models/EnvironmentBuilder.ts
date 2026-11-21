@@ -336,6 +336,191 @@ function buildStartingArch(
   return arch;
 }
 
+/** 赛道中央童话绘本中岛（填充赛道内圈留白，安全避开中心展台 r < 8.5 与外围赛道） */
+function buildInfieldCenterpiece(
+  spec: TrackSpec,
+  center: THREE.Vector3,
+  night: boolean
+): { infieldGroup: THREE.Group; spinners: THREE.Object3D[] } {
+  const infieldGroup = new THREE.Group();
+  const spinners: THREE.Object3D[] = [];
+  infieldGroup.position.set(center.x, 0, center.z);
+
+  // 1. 展台外围一圈矮栅栏与彩色小花圃（r = 9.8，让选车大厅瞬间丰满）
+  const fenceColor = night ? 0x3f507a : 0xfffcf5;
+  const flowerColors = [0xe05a47, 0xf4d35e, 0xf4a6b8, 0x9fd4ea];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    // 留出正前方和正后方入口，不遮挡展台镜头
+    if (Math.abs(Math.sin(a)) < 0.25) continue;
+    const fx = Math.cos(a) * 9.8;
+    const fz = Math.sin(a) * 9.8;
+    const post = paperMesh(new THREE.BoxGeometry(0.28, 1.15, 0.28), fenceColor);
+    post.position.set(fx, 0.58, fz);
+    infieldGroup.add(post);
+
+    // 栅栏旁点缀三朵迷你彩色折纸花
+    for (let k = 0; k < 3; k++) {
+      const fHead = paperMesh(
+        new THREE.ConeGeometry(0.32, 0.55, 5),
+        flowerColors[(i + k) % flowerColors.length],
+        { edges: false }
+      );
+      fHead.position.set(fx + (k - 1) * 0.65, 0.52, fz + (k % 2 === 0 ? 0.55 : -0.55));
+      infieldGroup.add(fHead);
+    }
+  }
+
+  // 2. 按章节主题在中岛放置核心地标（r = 14 ~ 20）
+  if (spec.theme === 'meadow') {
+    // ① 标志性童话大风车小屋（带自动旋转的四叶大风车）
+    const mill = new THREE.Group();
+    const tower = paperMesh(new THREE.CylinderGeometry(2.0, 2.9, 8.2, 8), 0xfcf6e8);
+    tower.position.y = 4.1;
+    mill.add(tower);
+    const roof = paperMesh(new THREE.ConeGeometry(2.65, 3.2, 8), 0xe05a47);
+    roof.position.y = 9.7;
+    mill.add(roof);
+    const win = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.1, 1.3),
+      createEmissivePaper(0xfff0a8, 0xffd166, 0.7)
+    );
+    win.position.set(0, 4.2, 2.35);
+    mill.add(win);
+
+    // 旋转大风车叶片组
+    const blades = new THREE.Group();
+    blades.position.set(0, 7.6, 2.35);
+    for (let i = 0; i < 4; i++) {
+      const arm = new THREE.Group();
+      arm.rotation.z = (i * Math.PI) / 2;
+      const sail = paperMesh(new THREE.BoxGeometry(1.1, 4.8, 0.14), i % 2 === 0 ? 0xf4d35e : 0xfffdf6);
+      sail.position.y = 2.6;
+      arm.add(sail);
+      blades.add(arm);
+    }
+    const hub = paperMesh(new THREE.CylinderGeometry(0.55, 0.55, 0.45, 8), 0x8b5e3c);
+    hub.rotation.x = Math.PI / 2;
+    blades.add(hub);
+    blades.userData = { kind: 'windmill' };
+    mill.add(blades);
+    spinners.push(blades);
+
+    mill.position.set(-14.5, 0, -13.5);
+    mill.rotation.y = 0.65;
+    infieldGroup.add(mill);
+
+    // ② 浅蓝折纸小池塘 + 荷叶 + 白色小纸船（呼应「风车与溪流」）
+    const pond = new THREE.Mesh(
+      new THREE.CylinderGeometry(6.8, 6.8, 0.12, 18),
+      createPaperMaterial(0x8fd3f4, undefined, 0.65)
+    );
+    pond.scale.set(1.25, 1, 0.85);
+    pond.position.set(13.5, 0.08, -11.5);
+    pond.receiveShadow = true;
+    infieldGroup.add(pond);
+
+    const pondRim = paperMesh(new THREE.TorusGeometry(6.9, 0.35, 6, 20), 0xe6d8be);
+    pondRim.rotation.x = Math.PI / 2;
+    pondRim.scale.set(1.25, 0.85, 1);
+    pondRim.position.set(13.5, 0.14, -11.5);
+    infieldGroup.add(pondRim);
+
+    // 池塘里的折纸小纸船
+    const boat = new THREE.Group();
+    const hull = paperMesh(new THREE.CylinderGeometry(1.5, 1.0, 0.75, 4), 0xfffdf8);
+    hull.rotation.y = Math.PI / 4;
+    hull.scale.set(0.7, 1, 1.4);
+    hull.position.y = 0.4;
+    boat.add(hull);
+    const sail = paperMesh(new THREE.ConeGeometry(0.85, 1.8, 3), 0xe05a47);
+    sail.scale.set(0.35, 1, 1.1);
+    sail.position.y = 1.4;
+    boat.add(sail);
+    boat.position.set(14.0, 0.12, -11.2);
+    boat.rotation.y = -0.5;
+    infieldGroup.add(boat);
+
+    // ③ 迷你童话折纸小屋 + 周边树丛
+    const cottage = new THREE.Group();
+    const wall = paperMesh(new THREE.BoxGeometry(4.4, 3.2, 3.8), 0xfcf6e8);
+    wall.position.y = 1.6;
+    cottage.add(wall);
+    const cRoof = paperMesh(new THREE.ConeGeometry(3.8, 2.6, 4), 0x4b8ab0);
+    cRoof.rotation.y = Math.PI / 4;
+    cRoof.position.y = 4.4;
+    cottage.add(cRoof);
+    cottage.position.set(-13.5, 0, 12.5);
+    cottage.rotation.y = 0.9;
+    infieldGroup.add(cottage);
+
+    const treeSpots: [number, number, number][] = [
+      [-18, -4, 1.15],
+      [-7, -17, 1.0],
+      [4, -18, 1.25],
+      [18, -2, 1.05],
+      [15, 11, 1.15],
+      [5, 16, 0.95],
+      [-6, 17, 1.1],
+    ];
+    for (const [tx, tz, sc] of treeSpots) {
+      const tr = new THREE.Group();
+      const trunk = paperMesh(new THREE.CylinderGeometry(0.32, 0.45, 2.2, 6), 0x7a5638);
+      trunk.position.y = 1.1;
+      tr.add(trunk);
+      const c1 = paperMesh(new THREE.ConeGeometry(2.3, 2.8, 7), 0x5c9457);
+      c1.position.y = 3.1;
+      tr.add(c1);
+      const c2 = paperMesh(new THREE.ConeGeometry(1.65, 2.4, 7), 0x7cb572);
+      c2.position.y = 4.8;
+      tr.add(c2);
+      tr.position.set(tx, 0, tz);
+      tr.scale.setScalar(sc);
+      infieldGroup.add(tr);
+    }
+  } else if (spec.theme === 'neon') {
+    // 暮色纸镇：中央发光纸雕灯笼宝塔
+    const pagoda = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const s = 1 - i * 0.22;
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(5.2 * s, 2.6, 5.2 * s),
+        createEmissivePaper(0xffd166, 0xffa826, 0.85)
+      );
+      body.position.y = 1.3 + i * 3.3;
+      pagoda.add(body);
+      const roof = paperMesh(new THREE.ConeGeometry(4.8 * s, 1.5, 4), 0x24314d);
+      roof.rotation.y = Math.PI / 4;
+      roof.position.y = 3.1 + i * 3.3;
+      pagoda.add(roof);
+    }
+    pagoda.position.set(-14, 0, -12);
+    infieldGroup.add(pagoda);
+  } else if (spec.theme === 'frost') {
+    // 冰霜峡谷：中央冰晶尖塔
+    const spire = new THREE.Mesh(
+      new THREE.ConeGeometry(4.2, 13, 6),
+      createEmissivePaper(0xd8f3ff, 0x8ad0f5, 0.45)
+    );
+    spire.position.set(-14, 6.5, -12);
+    infieldGroup.add(spire);
+  } else {
+    // 午后书桌：手账彩色笔筒
+    const cup = paperMesh(new THREE.CylinderGeometry(3.4, 3.0, 6.5, 12), 0xe05a47);
+    cup.position.set(-14, 3.25, -12);
+    infieldGroup.add(cup);
+    const pCols = [0xf4d35e, 0x4b8ab0, 0x8eb87a];
+    for (let i = 0; i < 3; i++) {
+      const p = paperMesh(new THREE.CylinderGeometry(0.55, 0.55, 10, 6), pCols[i]);
+      p.position.set(-14 + (i - 1) * 1.1, 6.5, -12 + (i % 2) * 0.8);
+      p.rotation.z = (i - 1) * 0.16;
+      infieldGroup.add(p);
+    }
+  }
+
+  return { infieldGroup, spinners };
+}
+
 /** 远景多层剪纸山峦 + 奇幻纸艺天空 + 终点拱门 */
 export function buildEnvironment(
   spec: TrackSpec,
@@ -390,6 +575,10 @@ export function buildEnvironment(
   const arch = buildStartingArch(spec, startPos, startHeading, night);
   group.add(arch);
 
+  const { infieldGroup, spinners } = buildInfieldCenterpiece(spec, center, night);
+  group.add(infieldGroup);
+  animItems.push(...spinners);
+
   return { group, clouds: animItems };
 }
 
@@ -397,6 +586,11 @@ export function buildEnvironment(
 export function updateClouds(clouds: THREE.Object3D[], time: number): void {
   for (const c of clouds) {
     const kind = c.userData.kind as string | undefined;
+
+    if (kind === 'windmill') {
+      c.rotation.z -= 0.012;
+      continue;
+    }
 
     if (kind === 'balloon') {
       const phase = c.userData.phase as number;
