@@ -298,11 +298,6 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     bounds.minZ = Math.min(bounds.minZ, p.z);
     bounds.maxZ = Math.max(bounds.maxZ, p.z);
   }
-  const center = new THREE.Vector3(
-    (bounds.minX + bounds.maxX) / 2,
-    0,
-    (bounds.minZ + bounds.maxZ) / 2
-  );
 
   const normalAt = (i: number) => {
     const tg = tangents[i % ROAD_SAMPLES];
@@ -815,6 +810,29 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
       tangent: tangents[best],
     };
   };
+
+  // 默认取包围盒中心；若是 8 字形等赛道穿过中心，自动寻找环内离赛道最远的开阔空地作为展台与中岛中心
+  const { minX, maxX, minZ, maxZ } = bounds;
+  const center = new THREE.Vector3((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+  if (query(center).dist < half + 22) {
+    let bestPt = center.clone();
+    let bestClearance = query(center).dist;
+    const probe = new THREE.Vector3();
+    const steps = 14;
+    for (let ix = 2; ix < steps - 1; ix++) {
+      for (let iz = 2; iz < steps - 1; iz++) {
+        const px = minX + ((maxX - minX) * ix) / steps;
+        const pz = minZ + ((maxZ - minZ) * iz) / steps;
+        probe.set(px, 0, pz);
+        const d = query(probe).dist;
+        if (d > bestClearance) {
+          bestClearance = d;
+          bestPt.copy(probe);
+        }
+      }
+    }
+    center.copy(bestPt);
+  }
 
   buildStoryLandmarks(spec, curve, half, group);
 
