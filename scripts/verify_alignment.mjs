@@ -45,6 +45,11 @@ await page.goto(fileUrl, { waitUntil: 'load', timeout: 30000 });
 await page.waitForSelector('canvas', { timeout: 15000 });
 await wait(3000);
 
+// 0. 验证开场精装立体书封面
+await page.screenshot({ path: 'shots/v5-storybook-cover.png' });
+await page.evaluate(() => window.__store.getState().setBookCover(false));
+await wait(500);
+
 // 1. 验证大厅 Step 1 (模式)
 await page.screenshot({ path: 'shots/v5-lobby-step1.png' });
 
@@ -98,6 +103,7 @@ await mp.goto(fileUrl, { waitUntil: 'load', timeout: 30000 });
 await mp.waitForSelector('canvas', { timeout: 15000 });
 await wait(2000);
 await mp.evaluate(() => {
+  window.__store.getState().setBookCover(false);
   window.__store.getState().setResults([]);
   window.__engine.startRace(window.__store.getState().config);
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { useGameStore } from './store/gameStore';
 import LobbyOverlay from './ui/LobbyOverlay';
+import { StoryBookIntro } from './ui/StoryBookIntro';
 import RaceHUD from './ui/RaceHUD';
 import TouchControls from './ui/TouchControls';
 import Modals from './ui/Modals';
@@ -15,6 +16,8 @@ export default function App() {
   const phase = useGameStore((s) => s.phase);
   const config = useGameStore((s) => s.config);
   const lobbyStep = useGameStore((s) => s.lobbyStep);
+  const bookCover = useGameStore((s) => s.bookCover);
+  const setBookCover = useGameStore((s) => s.setBookCover);
   const settings = useGameStore((s) => s.settings);
 
   // 初始化引擎
@@ -123,7 +126,12 @@ export default function App() {
           </div>
         </div>
       )}
-      {phase === 'lobby' && !initError && <LobbyOverlay onStart={onStart} />}
+      {phase === 'lobby' && !initError && bookCover && (
+        <StoryBookIntro onOpenBook={() => setBookCover(false)} />
+      )}
+      {phase === 'lobby' && !initError && !bookCover && (
+        <LobbyOverlay onStart={onStart} />
+      )}
       {inRace && <RaceHUD getMinimap={getMinimap} />}
       {settings.touch && (phase === 'countdown' || phase === 'racing') && (
         <TouchControls setTouch={setTouch} requestItem={requestItem} />

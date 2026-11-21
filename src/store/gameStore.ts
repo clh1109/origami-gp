@@ -58,7 +58,7 @@ interface GameStore {
 export const useGameStore = create<GameStore>((set, get) => ({
   config: { mode: 'grandprix', paperId: 'medium', racerId: 'fox', trackId: 'meadow' },
   lobbyStep: 1,
-  bookCover: false,
+  bookCover: true,
   phase: 'lobby',
   settings: loadSettings(),
   hud: DEFAULT_HUD,
