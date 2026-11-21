@@ -130,7 +130,8 @@ function buildStoryLandmarks(
   spec: TrackSpec,
   curve: THREE.CatmullRomCurve3,
   half: number,
-  group: THREE.Group
+  group: THREE.Group,
+  isClearOfAllRoads?: (x: number, z: number, minDist: number) => boolean
 ): void {
   if (spec.theme !== 'meadow') return;
 
@@ -256,6 +257,7 @@ function buildStoryLandmarks(
           );
           const offsetDist = half + bw * 0.5 + 4.5 + b * 1.2;
           const pos = p.clone().addScaledVector(n, side * offsetDist);
+          if (isClearOfAllRoads && !isClearOfAllRoads(pos.x, pos.z, half + bw * 0.5 + 2.0)) continue;
           book.position.set(pos.x, curY + bh / 2, pos.z);
           book.rotation.y = heading + (b - 0.5) * 0.18 * side;
           book.castShadow = true;
@@ -302,6 +304,29 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
   const normalAt = (i: number) => {
     const tg = tangents[i % ROAD_SAMPLES];
     return new THREE.Vector3(-tg.z, 0, tg.x).normalize();
+  };
+
+  /** 检查 (x, z) 是否与整条赛道任意路段（包含上下层）保持安全距离 */
+  const isClearOfAllRoads = (x: number, z: number, minDist: number): boolean => {
+    const minSq = minDist * minDist;
+    for (let j = 0; j < ROAD_SAMPLES; j += 2) {
+      const dx = samples[j].x - x;
+      const dz = samples[j].z - z;
+      if (dx * dx + dz * dz < minSq) return false;
+    }
+    return true;
+  };
+
+  /** 检查高架桥 (x, z, y) 正下方是否有下层跑道穿过（有则留出净空，不插桥墩） */
+  const hasLowerRoadUnder = (x: number, z: number, y: number, clearance: number): boolean => {
+    const cSq = clearance * clearance;
+    for (let j = 0; j < ROAD_SAMPLES; j += 2) {
+      if (samples[j].y >= y - 4.0) continue;
+      const dx = samples[j].x - x;
+      const dz = samples[j].z - z;
+      if (dx * dx + dz * dz < cSq) return true;
+    }
+    return false;
   };
 
   // ---------- 路面（沿样条 p.y 起伏，形成 3D 坡道纸带） ----------
@@ -521,6 +546,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     for (let i = 0; i < ROAD_SAMPLES; i += 12) {
       const p = samples[i];
       if (p.y < 1.5) continue;
+      if (hasLowerRoadUnder(p.x, p.z, p.y, half + 9)) continue;
       const tg = tangents[i];
       const heading = Math.atan2(tg.x, tg.z);
       const h = p.y - 0.05;
@@ -706,6 +732,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     const side = i % 2 === 0 ? 1 : -1;
     const off = half + 4 + Math.random() * 12;
     const pos = p.clone().addScaledVector(n, side * off);
+    if (!isClearOfAllRoads(pos.x, pos.z, half + 4.0)) continue;
     const rig = buildPopupProp(spec.theme, i, spec.colors);
     rig.rootPivot.position.set(pos.x, 0, pos.z);
     rig.rootPivot.rotation.y = Math.random() * Math.PI * 2;
@@ -786,9 +813,12 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
         const off = half + curbW + 1.7 + Math.random() * 2.4;
         const pos = p.clone().addScaledVector(n, side * off);
         pos.y = 0;
+        if (!isClearOfAllRoads(pos.x, pos.z, half + 2.8)) continue;
         place(bushGeos, bushProto, pos, Math.random() * Math.PI, 0.75 + Math.random() * 0.6);
         const pos2 = pos.clone().addScaledVector(tangents[i], 1.3 + Math.random());
-        place(bushGeos, bushProto, pos2, Math.random() * Math.PI, 0.45 + Math.random() * 0.4);
+        if (isClearOfAllRoads(pos2.x, pos2.z, half + 2.8)) {
+          place(bushGeos, bushProto, pos2, Math.random() * Math.PI, 0.45 + Math.random() * 0.4);
+        }
       }
     }
 
@@ -802,9 +832,11 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
       const side = Math.random() > 0.5 ? 1 : -1;
       const base = p.clone().addScaledVector(n, side * (half + 3.5 + Math.random() * 13));
       base.y = 0;
+      if (!isClearOfAllRoads(base.x, base.z, half + 2.8)) continue;
       const count = 5 + Math.floor(Math.random() * 3);
       for (let k = 0; k < count; k++) {
         const pos = base.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.2, 0, (Math.random() - 0.5) * 2.2));
+        if (!isClearOfAllRoads(pos.x, pos.z, half + 2.0)) continue;
         const s = 0.7 + Math.random() * 0.7;
         const rotY = Math.random() * Math.PI;
         place(stemGeos, flowerProto.stem, pos, rotY, s);
@@ -897,7 +929,7 @@ export function buildTrack(spec: TrackSpec): TrackBuildResult {
     center.copy(bestPt);
   }
 
-  buildStoryLandmarks(spec, curve, half, group);
+  buildStoryLandmarks(spec, curve, half, group, isClearOfAllRoads);
 
   return {
     group,
